@@ -2,6 +2,7 @@
 #   python3 server.py                     -> print only
 #   python3 server.py --mongo             -> also store in MongoDB (riderguard.readings)
 #   python3 server.py --host 192.168.x.y  -> broker on another laptop
+#   python3 server.py --user U --password P -> broker with password_file enabled (see mosquitto.conf)
 #
 # Setup (WSL): sudo apt-get install mosquitto mosquitto-clients
 #              pip install paho-mqtt pymongo
@@ -44,6 +45,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--mongo", action="store_true")
+    parser.add_argument("--user")
+    parser.add_argument("--password")
     args = parser.parse_args()
 
     db = None
@@ -52,6 +55,8 @@ if __name__ == "__main__":
         db = MongoClient("mongodb://localhost:27017/")["riderguard"]["readings"]
 
     client = make_client()
+    if args.user:
+        client.username_pw_set(args.user, args.password)
     client.user_data_set({"db": db})
     client.on_connect = on_connect
     client.on_message = on_message
