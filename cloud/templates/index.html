@@ -1,0 +1,33 @@
+<html>
+    <head>
+        <title>RiderGuard Dashboard</title>
+        <meta http-equiv="refresh" content="2">
+        <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            table { border-collapse: collapse; margin-bottom: 24px; }
+            th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; font-size: 13px; }
+            th { background: #eee; }
+        </style>
+    </head>
+    <body>
+        <h2>RiderGuard Dashboard</h2>
+
+        <h3>Nodes</h3>
+        <table>
+            <tr><th>Topic</th><th>Readings</th><th>Last seen</th><th>Latest</th></tr>
+            {% for t in topics %}
+            <tr><td>{{t.topic}}</td><td>{{t.count}}</td><td>{{t.time}}</td><td>{{t.data}}</td></tr>
+            {% else %}
+            <tr><td colspan="4">No readings yet</td></tr>
+            {% endfor %}
+        </table>
+
+        <h3>Recent readings</h3>
+        <table>
+            <tr><th>Time</th><th>Topic</th><th>Data</th></tr>
+            {% for r in recent %}
+            <tr><td>{{r.time}}</td><td>{{r.topic}}</td><td>{{r.data}}</td></tr>
+            {% endfor %}
+        </table>
+    </body>
+</html>
