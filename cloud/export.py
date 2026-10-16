@@ -3,9 +3,9 @@
 #   python3 export.py --labelled           -> only readings recorded while a label was set
 #   python3 export.py --label abrupt_turn  -> only that label
 import argparse
-import csv
 import os
 
+import pandas as pd
 from pymongo import MongoClient
 
 col = MongoClient("mongodb://localhost:27017/")["riderguard"]["readings"]
@@ -16,16 +16,10 @@ def export(out_dir, query):
     for topic in sorted(col.distinct("topic", query)):
         docs = list(col.find({**query, "topic": topic}).sort("received_at", 1))
 
-        fields = []  # union of data keys, in first-seen order
-        for d in docs:
-            fields += [k for k in d["data"] if k not in fields]
+        rows = [{"received_at": d["received_at"], "label": d.get("label"), **d["data"]} for d in docs]
 
         path = os.path.join(out_dir, topic.split("/")[-1] + ".csv")
-        with open(path, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["received_at", "label"] + fields)
-            for d in docs:
-                writer.writerow([d["received_at"], d.get("label") or ""] + [d["data"].get(k, "") for k in fields])
+        pd.DataFrame(rows).to_csv(path, index=False)
         print(f"{path}: {len(docs)} rows")
 
 
