@@ -15,7 +15,10 @@ def make_client():
 
 
 def send(client, label, state):
-    client.publish(TOPIC, json.dumps({"label": label, "state": state, "t": time.time()}))
+    if state == "start":
+        client.publish(TOPIC, json.dumps({"label": label}), retain=True)
+    else:
+        client.publish(TOPIC, "", retain=True)
     print(f"  sent: {label} {state}")
 
 

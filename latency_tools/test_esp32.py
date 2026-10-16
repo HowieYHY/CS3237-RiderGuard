@@ -40,6 +40,8 @@ if __name__ == "__main__":
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--n", type=int, default=20)
     args = parser.parse_args()
+    if args.host not in ("localhost", "127.0.0.1"):
+        print("WARNING: fake data goes to a shared broker. Make sure server.py --mongo is not running.")
 
     client = make_client()
     client.on_connect = on_connect

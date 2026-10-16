@@ -23,25 +23,28 @@ def make_client():
 
 def on_connect(client, userdata, flags, rc):
     print("Connected, rc =", rc)
-    for topic in DISTANCE_TOPICS:
+    for topic in userdata["topics"]:
         client.subscribe(topic)
     client.subscribe(LANE_TOPIC)
 
 
 def on_message(client, userdata, message):
     try:
-        data = json.loads(message.payload.decode("utf-8"))
-    except ValueError:
-        print(message.topic, "skipped, payload is not JSON")
-        return
+        handle(client, userdata, message)
+    except (KeyError, TypeError, ValueError, AttributeError) as error:
+        print(message.topic, "skipped, bad message:", repr(error))
 
-    if message.topic in DISTANCE_TOPICS:
+
+def handle(client, userdata, message):
+    data = json.loads(message.payload.decode("utf-8"))
+
+    if message.topic in userdata["topics"]:
         distance = data.get("distance_cm")
         if distance is None or distance < 0:
             print(message.topic, "skipped, no valid distance_cm")
             return
         if object_hazard(distance):
-            node = DISTANCE_TOPICS[message.topic]
+            node = userdata["topics"][message.topic]
             command = {"action": "vibrate", "seq": data.get("seq"), "t_ms": data.get("t_ms")}
             client.publish("riderguard/cmd/" + node, json.dumps(command))
             print(message.topic, "seq", data.get("seq"), "distance", distance, "-> vibrate", node)
@@ -57,9 +60,14 @@ def on_message(client, userdata, message):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="localhost")
+    parser.add_argument("--nodes", default="helmet")
     args = parser.parse_args()
 
+    wanted = args.nodes.split(",")
+    topics = {t: n for t, n in DISTANCE_TOPICS.items() if n in wanted}
+
     client = make_client()
+    client.user_data_set({"topics": topics})
     client.on_connect = on_connect
     client.on_message = on_message
     client.connect(args.host, 1883, 60)
