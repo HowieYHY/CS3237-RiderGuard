@@ -7,6 +7,8 @@
 # Setup (WSL): sudo apt-get install mosquitto mosquitto-clients
 #              pip install paho-mqtt pymongo
 # ESP32 sketches publish JSON to riderguard/<node><sensor>, e.g. riderguard/helmetMPU6050
+# Label tool publishes {"label": ...} to riderguard/label; readings are tagged with the current label
+# Topic/payload spec: TOPICS.md
 import argparse
 import json
 import time
@@ -14,6 +16,7 @@ import time
 import paho.mqtt.client as mqtt
 
 TOPIC = "riderguard/#"
+LABEL_TOPIC = "riderguard/label"
 
 
 def make_client():
@@ -35,10 +38,17 @@ def on_message(client, userdata, message):
     except json.JSONDecodeError:
         data = {"raw": payload}  # e.g. helmet LiDAR raw hex
 
-    print(f"Received {message.topic}: {data}")
+    if message.topic == LABEL_TOPIC:
+        # accepts {"label": "safe"} or plain text "safe"; null/empty clears the label
+        userdata["label"] = (data.get("label", data.get("raw")) if isinstance(data, dict) else data) or None
+        print(f"Label set to: {userdata['label']}")
+        return
+
+    print(f"Received {message.topic} [{userdata['label']}]: {data}")
 
     if userdata["db"] is not None:
-        userdata["db"].insert_one({"topic": message.topic, "received_at": time.time(), "data": data})
+        userdata["db"].insert_one({"topic": message.topic, "received_at": time.time(),
+                                   "label": userdata["label"], "data": data})
 
 
 if __name__ == "__main__":
@@ -57,7 +67,7 @@ if __name__ == "__main__":
     client = make_client()
     if args.user:
         client.username_pw_set(args.user, args.password)
-    client.user_data_set({"db": db})
+    client.user_data_set({"db": db, "label": None})
     client.on_connect = on_connect
     client.on_message = on_message
     client.connect(args.host, 1883, 60)
