@@ -1,253 +1,495 @@
+
 #include <Arduino.h>
 #include <WiFi.h>
-#include <Wire.h>
-
-#include <Adafruit_MPU6050.h>
-#include <Adafruit_Sensor.h>
-#include <TinyGPS++.h>
-
+#include <TinyGPSPlus.h>
+#include <LDS_LDROBOT_LD14P.h>
 #include "ESP32MQTTClient.h"
+#include "esp_idf_version.h"
 
-const char *ssid = "YOUR_WIFI_NAME";
-const char *pass = "YOUR_WIFI_PASSWORD";
+// =============== WIFI + MQTT ===============
 
-const char *server = "mqtt://test.mosquitto.org:1883";
+const char *ssid = "your_wifi";
+const char *pass = "your_password";
 
-const char *mpuTopic   = "riderguard/helmetMPU6050";
-const char *gpsTopic   = "riderguard/helmetGPS";
-const char *lidarTopic = "riderguard/helmetLIDAR";
+// Laptop's reachable IPv4 address
+char *server = (char *)"mqtt://ipv4:1883";
+
+char *gpsTopic = (char *)"riderguard/helmetGPS";
+char *lidarTopic = (char *)"riderguard/helmetLIDAR";
 
 ESP32MQTTClient mqttClient;
 
-Adafruit_MPU6050 mpu;
-TinyGPSPlus gps;
+const unsigned long MQTT_INTERVAL_MS = 500;
+unsigned long lastMqttPublish = 0;
 
-HardwareSerial gpsSerial(2);
-HardwareSerial lidarSerial(1);
+// =============== PIN DEFINITIONS ===============
 
-#define MPU_SDA 21
-#define MPU_SCL 22
-
+// GPS
 #define GPS_RX 16
 #define GPS_TX 17
+#define GPS_BAUD 9600
 
+// LiDAR
 #define LIDAR_RX 26
 #define LIDAR_TX 27
 
-#define GPS_BAUD 9600
-#define LIDAR_BAUD 115200
+// =============== GPS SETTINGS ===============
 
-unsigned long previousPublish = 0;
-const unsigned long publishInterval = 1000;
+TinyGPSPlus gps;
+HardwareSerial gpsSerial(2);
 
-void setup() {
+// =============== LIDAR SETTINGS ===============
 
-    Serial.begin(115200);
-    delay(1000);
+HardwareSerial lidarSerial(1);
+LDS_LDROBOT_LD14P lidar;
 
-    Wire.begin(MPU_SDA, MPU_SCL);
+// Front sector: 330 to 30 degrees
+const float FRONT_ANGLE = 30.0;
 
-    if (!mpu.begin()) {
-        Serial.println("MPU6050 not detected!");
+// Distance filtering (mm)
+const float MIN_DISTANCE = 150.0;
+const float MAX_DISTANCE = 12000.0;
 
-        while (1) {
-            delay(100);
-        }
-    }
+// Quality filtering (experimental)
+const float MIN_QUALITY = 40.0;
 
-    Serial.println("MPU6050 initialized!");
+// Proximity thresholds (mm)
+const float DANGER_DISTANCE = 1000.0;
+const float CAUTION_DISTANCE = 2500.0;
 
-    gpsSerial.begin(
-        GPS_BAUD,
-        SERIAL_8N1,
-        GPS_RX,
-        GPS_TX
-    );
+// LiDAR freshness timeout
+const unsigned long SCAN_TIMEOUT_MS = 2000;
 
-    Serial.println("GPS UART initialized!");
+// =============== LIDAR VARIABLES ===============
 
-    lidarSerial.begin(
-        LIDAR_BAUD,
-        SERIAL_8N1,
-        LIDAR_RX,
-        LIDAR_TX
-    );
+// Accumulated scan values
+float nearestDistance = MAX_DISTANCE + 1;
+float nearestAngle = 0;
+float nearestQuality = 0;
+int validPoints = 0;
 
-    Serial.println("LiDAR UART initialized!");
+// Completed scan values
+float reportedDistance = -1;
+float reportedAngle = -1;
+float reportedQuality = 0;
+int reportedPoints = 0;
 
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, pass);
+bool scanAvailable = false;
+unsigned long lastScanTime = 0;
 
-    Serial.print("Connecting to WiFi");
+// =============== LIDAR CALLBACKS ===============
 
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-
-    Serial.println();
-    Serial.println("WiFi connected!");
-
-    Serial.print("IP Address: ");
-    Serial.println(WiFi.localIP());--
-
-    mqttClient.setURI(server);
-    mqttClient.enableDebuggingMessages();
-    mqttClient.loopStart();
-
-    Serial.println("MQTT started!");
+int lidar_serial_read_callback() {
+  return lidarSerial.read();
 }
 
-void publishMPU6050() {
-
-    sensors_event_t a, g, temp;
-
-    mpu.getEvent(&a, &g, &temp);
-
-    char payload[200];
-
-    snprintf(
-        payload,
-        sizeof(payload),
-
-        "{\"ax\":%.2f,"
-        "\"ay\":%.2f,"
-        "\"az\":%.2f,"
-        "\"gx\":%.2f,"
-        "\"gy\":%.2f,"
-        "\"gz\":%.2f}",
-
-        a.acceleration.x,
-        a.acceleration.y,
-        a.acceleration.z,
-
-        g.gyro.x,
-        g.gyro.y,
-        g.gyro.z
-    );
-
-    mqttClient.publish(
-        mpuTopic,
-        payload,
-        0,
-        false
-    );
-
-    Serial.print("MPU6050: ");
-    Serial.println(payload);
+size_t lidar_serial_write_callback(
+  const uint8_t *buffer,
+  size_t length
+) {
+  return lidarSerial.write(buffer, length);
 }
+
+void lidar_scan_point_callback(
+  float angle_deg,
+  float distance_mm,
+  float quality,
+  bool scan_completed
+) {
+
+  // Save results when a revolution completes
+  if (scan_completed) {
+
+    reportedPoints = validPoints;
+
+    if (validPoints > 0) {
+      reportedDistance = nearestDistance;
+      reportedAngle = nearestAngle;
+      reportedQuality = nearestQuality;
+    } else {
+      reportedDistance = -1;
+      reportedAngle = -1;
+      reportedQuality = 0;
+    }
+
+    scanAvailable = true;
+    lastScanTime = millis();
+
+    // Reset accumulation
+    nearestDistance = MAX_DISTANCE + 1;
+    nearestAngle = 0;
+    nearestQuality = 0;
+    validPoints = 0;
+  }
+
+  // Filter for front-facing measurements
+  bool isFront = (
+    angle_deg >= (360.0 - FRONT_ANGLE) ||
+    angle_deg <= FRONT_ANGLE
+  );
+
+  if (!isFront) return;
+
+  // Reject invalid measurement values
+  if (!isfinite(distance_mm) ||
+      !isfinite(angle_deg) ||
+      !isfinite(quality)) {
+    return;
+  }
+
+  if (distance_mm < MIN_DISTANCE ||
+      distance_mm > MAX_DISTANCE) {
+    return;
+  }
+
+  if (quality < MIN_QUALITY) {
+    return;
+  }
+
+  validPoints++;
+
+  // Keep nearest obstacle
+  if (distance_mm < nearestDistance) {
+    nearestDistance = distance_mm;
+    nearestAngle = angle_deg;
+    nearestQuality = quality;
+  }
+}
+
+void lidar_packet_callback(
+  uint8_t *packet,
+  uint16_t length,
+  bool scan_completed
+) {
+  // Not needed for this application
+}
+
+void lidar_info_callback(
+  LDS::info_t code,
+  String info
+) {
+  Serial.print("LiDAR info: ");
+  Serial.println(info);
+}
+
+void lidar_error_callback(
+  LDS::result_t code,
+  String aux_info
+) {
+  Serial.print("LiDAR error: ");
+  Serial.print(lidar.resultCodeToString(code));
+  Serial.print(" - ");
+  Serial.println(aux_info);
+}
+
+// =============== HAZARD CLASSIFICATION ===============
+
+const char *getHazardStatus(float distance_mm) {
+
+  if (distance_mm < 0) {
+    return "NO_VALID_RETURN";
+  }
+
+  if (distance_mm <= DANGER_DISTANCE) {
+    return "DANGER";
+  }
+
+  if (distance_mm <= CAUTION_DISTANCE) {
+    return "CAUTION";
+  }
+
+  return "SAFE";
+}
+
+// =============== MQTT PUBLISH ===============
 
 void publishGPS() {
 
-    if (!gps.location.isValid() ||
-        gps.location.age() > 5000) {
+  // Only use recent GPS measurements
+  bool gpsValid = (
+    gps.location.isValid() &&
+    gps.location.age() < 2000
+  );
 
-        Serial.println("Waiting for valid GPS location...");
-        return;
-    }
+  bool speedValid = (
+    gpsValid &&
+    gps.speed.isValid() &&
+    gps.speed.age() < 2000
+  );
 
-    char payload[150];
+  char latText[24];
+  char lngText[24];
+  char speedText[24];
 
-    if (gps.speed.isValid() &&
-        gps.speed.age() <= 5000) {
+  if (gpsValid) {
+    snprintf(latText, sizeof(latText),
+             "%.6f", gps.location.lat());
 
-        snprintf(
-            payload,
-            sizeof(payload),
+    snprintf(lngText, sizeof(lngText),
+             "%.6f", gps.location.lng());
+  } else {
+    strcpy(latText, "null");
+    strcpy(lngText, "null");
+  }
 
-            "{\"latitude\":%.6f,"
-            "\"longitude\":%.6f,"
-            "\"speed_kmph\":%.2f}",
+  if (speedValid) {
+    snprintf(speedText, sizeof(speedText),
+             "%.2f", gps.speed.kmph());
+  } else {
+    strcpy(speedText, "null");
+  }
 
-            gps.location.lat(),
-            gps.location.lng(),
-            gps.speed.kmph()
-        );
+  char payload[256];
 
-    } else {
+  snprintf(
+    payload,
+    sizeof(payload),
+    "{\"time_ms\":%lu,"
+    "\"gps_valid\":%s,"
+    "\"latitude\":%s,"
+    "\"longitude\":%s,"
+    "\"speed_kmph\":%s,"
+    "\"satellites\":%lu}",
+    millis(),
+    gpsValid ? "true" : "false",
+    latText,
+    lngText,
+    speedText,
+    (unsigned long)(
+      gps.satellites.isValid() &&
+      gps.satellites.age() < 5000
+      ? gps.satellites.value() : 0
+    )
+  );
 
-        snprintf(
-            payload,
-            sizeof(payload),
+  mqttClient.publish(gpsTopic, payload, 0, false);
 
-            "{\"latitude\":%.6f,"
-            "\"longitude\":%.6f,"
-            "\"speed_kmph\":null}",
-
-            gps.location.lat(),
-            gps.location.lng()
-        );
-    }
-
-    mqttClient.publish(
-        gpsTopic,
-        payload,
-        0,
-        false
-    );
-
-    Serial.print("GPS: ");
-    Serial.println(payload);
+  Serial.print("GPS MQTT: ");
+  Serial.println(payload);
 }
 
 void publishLIDAR() {
 
-    if (!lidarSerial.available()) {
-        return;
-    }
+  bool freshScan = (
+    scanAvailable &&
+    millis() - lastScanTime <= SCAN_TIMEOUT_MS
+  );
 
-    char payload[241];
+  bool validObstacle = (
+    freshScan &&
+    reportedPoints > 0 &&
+    reportedDistance >= 0
+  );
 
-    size_t count = 0;
+  float distanceCM = validObstacle ?
+      reportedDistance / 10.0 : -1.0;
 
-    while (lidarSerial.available() &&
-           count < 80) {
+  float angle = validObstacle ?
+      reportedAngle : -1.0;
 
-        uint8_t data = lidarSerial.read();
+  float quality = validObstacle ?
+      reportedQuality : 0.0;
 
-        snprintf(
-            payload + count * 3,
-            sizeof(payload) - count * 3,
-            "%02X ",
-            data
-        );
+  const char *status;
 
-        count++;
-    }
-
-    payload[count * 3] = '\0';
-
-    mqttClient.publish(
-        lidarTopic,
-        payload,
-        0,
-        false
+  if (!freshScan) {
+    status = "NO_SCAN_DATA";
+  } else {
+    status = getHazardStatus(
+      validObstacle ? reportedDistance : -1
     );
+  }
 
-    Serial.print("LiDAR RAW: ");
-    Serial.println(payload);
+  char payload[256];
+
+  snprintf(
+    payload,
+    sizeof(payload),
+    "{\"time_ms\":%lu,"
+    "\"scan_valid\":%s,"
+    "\"distance_cm\":%.2f,"
+    "\"angle_deg\":%.2f,"
+    "\"quality\":%.2f,"
+    "\"valid_front_points\":%d,"
+    "\"status\":\"%s\"}",
+    millis(),
+    validObstacle ? "true" : "false",
+    distanceCM,
+    angle,
+    quality,
+    freshScan ? reportedPoints : 0,
+    status
+  );
+
+  mqttClient.publish(lidarTopic, payload, 0, false);
+
+  Serial.print("LiDAR MQTT: ");
+  Serial.println(payload);
 }
+
+// =============== SETUP ===============
+
+void setup() {
+
+  Serial.begin(115200);
+  delay(1000);
+
+  Serial.println("RiderGuard Helmet Starting...");
+
+  // ---------------- GPS ----------------
+
+  gpsSerial.begin(
+    GPS_BAUD,
+    SERIAL_8N1,
+    GPS_RX,
+    GPS_TX
+  );
+
+  Serial.println("GPS initialized");
+
+  // ---------------- LIDAR ----------------
+
+  lidarSerial.setRxBufferSize(1024);
+
+  uint32_t lidarBaud = lidar.getSerialBaudRate();
+
+  lidarSerial.begin(
+    lidarBaud,
+    SERIAL_8N1,
+    LIDAR_RX,
+    LIDAR_TX
+  );
+
+  lidar.setScanPointCallback(
+    lidar_scan_point_callback
+  );
+
+  lidar.setPacketCallback(
+    lidar_packet_callback
+  );
+
+  lidar.setSerialWriteCallback(
+    lidar_serial_write_callback
+  );
+
+  lidar.setSerialReadCallback(
+    lidar_serial_read_callback
+  );
+
+  lidar.setInfoCallback(
+    lidar_info_callback
+  );
+
+  lidar.setErrorCallback(
+    lidar_error_callback
+  );
+
+  lidar.init();
+
+  LDS::result_t result = lidar.start();
+
+  Serial.print("LiDAR start result: ");
+  Serial.println(lidar.resultCodeToString(result));
+
+  // ---------------- WIFI ----------------
+
+  WiFi.begin(ssid, pass);
+
+  Serial.print("Connecting to Wi-Fi");
+
+  unsigned long wifiStart = millis();
+
+  while (WiFi.status() != WL_CONNECTED &&
+         millis() - wifiStart < 10000) {
+
+    // Keep processing sensors while waiting
+    while (gpsSerial.available()) {
+      gps.encode(gpsSerial.read());
+    }
+
+    lidar.loop();
+
+    delay(1);
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println();
+    Serial.print("ESP32 IP: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println();
+    Serial.println("Wi-Fi not connected");
+  }
+
+  // ---------------- MQTT ----------------
+
+  mqttClient.setURI(server);
+  mqttClient.enableDebuggingMessages();
+  mqttClient.setKeepAlive(30);
+  mqttClient.loopStart();
+
+  Serial.println("MQTT loop started");
+}
+
+// =============== MAIN LOOP ===============
 
 void loop() {
 
-    while (gpsSerial.available()) {
-        gps.encode(gpsSerial.read());
+  // ---------------- GPS UPDATE ----------------
+
+  while (gpsSerial.available() > 0) {
+    gps.encode(gpsSerial.read());
+  }
+
+  // ---------------- LIDAR UPDATE ----------------
+
+  lidar.loop();
+
+  // ---------------- MQTT TIMER ----------------
+
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - lastMqttPublish >=
+      MQTT_INTERVAL_MS) {
+
+    lastMqttPublish = currentMillis;
+
+    if (WiFi.status() == WL_CONNECTED) {
+
+      publishGPS();
+      publishLIDAR();
+
+    } else {
+      Serial.println("Wi-Fi disconnected");
     }
-
-    publishLIDAR();
-
-    unsigned long currentMillis = millis();
-
-    if (currentMillis - previousPublish >= publishInterval) {
-
-        previousPublish = currentMillis;
-
-        publishMPU6050();
-        publishGPS();
-
-        Serial.println("-------------------------");
-    }
-
-    delay(5);
+  }
 }
+
+// =============== MQTT CALLBACKS ===============
+
+void onMqttConnect(esp_mqtt_client_handle_t client) {
+  Serial.println("MQTT CONNECTED!");
+}
+
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)
+
+esp_err_t handleMQTT(esp_mqtt_event_handle_t event) {
+  mqttClient.onEventCallback(event);
+  return ESP_OK;
+}
+
+#else
+
+void handleMQTT(
+  void *handler_args,
+  esp_event_base_t base,
+  int32_t event_id,
+  void *event_data
+) {
+  auto *event =
+    static_cast<esp_mqtt_event_handle_t>(event_data);
+
+  mqttClient.onEventCallback(event);
+}
+
 #endif
