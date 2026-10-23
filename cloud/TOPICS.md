@@ -8,13 +8,15 @@ Broker: Mosquitto on port 1883 (see `mosquitto.conf`). All payloads are JSON. `s
 |---|---|
 | `riderguard/leftGloveMPU6050` | `ax ay az` (m/s²), `gx gy gz` (deg/s), `distance_cm`, `bpm`, `avg_bpm`, `motor` |
 | `riderguard/rightGloveMPU6050` | `ax ay az` (m/s²), `gx gy gz` (deg/s), `distance_cm`, `temperature_c`, `temperature_valid`, `led` |
-| `riderguard/helmetMPU6050` | `ax ay az` (m/s²), `gx gy gz` (**rad/s** — Adafruit lib; should be deg/s to match gloves) |
-| `riderguard/helmetGPS` | `latitude`, `longitude`, `speed_kmph` (`null` if unavailable) |
-| `riderguard/helmetLIDAR` | currently raw hex bytes (stored as `{"raw": ...}`); proposed: `distance_cm` |
+| `riderguard/helmetMPU6050` | not published by the current helmet sketch; if re-added, `gx gy gz` in deg/s to match gloves |
+| `riderguard/helmetGPS` | `time_ms`, `gps_valid`, `latitude`, `longitude`, `speed_kmph` (`null` if unavailable), `satellites` |
+| `riderguard/helmetLIDAR` | `time_ms`, `scan_valid`, `distance_cm`, `angle_deg`, `quality`, `valid_front_points`, `status` |
 
-**To add on every sensor message** (needed for latency + aligning nodes):
+All nodes publish every 500 ms.
+
+**To add on every sensor message** (needed for latency + aligning nodes; not in any sketch yet):
 - `seq` — counter, +1 per message
-- `t_ms` — `millis()` when the reading was taken
+- `t_ms` — `millis()` when the reading was taken (helmet's `time_ms` → rename to `t_ms`)
 
 ## Labels (label tool → cloud)
 
