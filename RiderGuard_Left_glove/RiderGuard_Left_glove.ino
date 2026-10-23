@@ -7,11 +7,11 @@
 #include "esp_idf_version.h"
 
 // ---------------- MQTT SETTINGS ----------------
-const char *ssid = "XXX";
-const char *pass = "XXX";
+const char *ssid = "";
+const char *pass = "";
 
 // Use your laptop's reachable IPv4 address
-char *server = "mqtt://<insert IP>:1883";
+char *server = "mqtt://{IP ADDRESS}:1883";
 
 char *publishTopic = "riderguard/leftGloveMPU6050";
 
@@ -36,15 +36,20 @@ const float DISTANCE_THRESHOLD_CM = 30.0;
 const unsigned long MOTOR_PULSE_MS = 200;
 
 // ---------------- MAX30102 ----------------
-MAX30105 particleSensor;
+MAX30105 sensor;
 
-const byte RATE_SIZE = 4;
+const byte RATE_SIZE = 5;
 byte rates[RATE_SIZE];
 byte rateSpot = 0;
+byte validBeats = 0;
 long lastBeat = 0;
-
 float bpm = 0;
 float averageBPM = 0;
+
+// Only accept realistic heart rates (adjust for your case)
+const float MIN_BPM = 45;
+const float MAX_BPM = 180;
+
 bool max30102Ready = false;
 
 // ---------------- MOTOR STATE ----------------
@@ -103,44 +108,31 @@ float readDistanceCM() {
 // Update MAX30102 heart-rate estimate
 void updateHeartRate() {
   if (!max30102Ready) return;
-
-  long irValue = particleSensor.getIR();
-
-  // Finger/contact detection threshold is approximate.
-  // Tune for your sensor and placement.
-  if (irValue < 50000) {
-    bpm = 0;
-    averageBPM = 0;
-    return;
-  }
+  long irValue = sensor.getIR();
 
   if (checkForBeat(irValue)) {
-    unsigned long now = millis();
-    unsigned long delta = now - lastBeat;
-    lastBeat = now;
+    unsigned long delta = millis() - lastBeat;
+    lastBeat = millis();
 
-    if (delta > 0) {
-      float measuredBPM = 60000.0 / delta;
+    float measuredBPM = 60000.0 / delta;
 
-      if (measuredBPM >= 40 && measuredBPM <= 200) {
-        bpm = measuredBPM;
+    if (measuredBPM >= MIN_BPM && measuredBPM <= MAX_BPM) {
+      bpm = measuredBPM;
+      rates[rateSpot++] = (byte)bpm;
+      rateSpot = (rateSpot >= RATE_SIZE) ? 0 : rateSpot;
 
-        rates[rateSpot++] = (byte)bpm;
-        rateSpot %= RATE_SIZE;
+      if (validBeats < RATE_SIZE) {
+        validBeats++;
+      }
 
-        float total = 0;
-        byte count = 0;
-
+      if (validBeats >= RATE_SIZE) {
+        averageBPM = 0;
         for (byte i = 0; i < RATE_SIZE; i++) {
           if (rates[i] > 0) {
-            total += rates[i];
-            count++;
+            averageBPM += rates[i];
           }
         }
-
-        if (count > 0) {
-          averageBPM = total / count;
-        }
+        averageBPM /= RATE_SIZE;
       }
     }
   }
@@ -171,7 +163,7 @@ void setup() {
 
   // Shared I2C bus for MPU6050 and MAX30102
   Wire.begin(21, 22);
-  Wire.setClock(100000);
+  Wire.setClock(I2C_SPEED_STANDARD);
 
   // ---------------- MPU6050 ----------------
   bool mpuOK = true;
@@ -193,32 +185,33 @@ void setup() {
   digitalWrite(MOTOR_PIN, LOW);
 
   // ---------------- MAX30102 ----------------
-  if (particleSensor.begin(Wire, I2C_SPEED_STANDARD)) {
+  if (sensor.begin(Wire, I2C_SPEED_STANDARD)) {
     max30102Ready = true;
 
-    particleSensor.setup(
+    sensor.setup(
       60,    // LED brightness
-      4,     // sample average
+      RATE_SIZE,     // sample average
       2,     // Red + IR mode
       100,   // sample rate
       411,   // pulse width
       4096   // ADC range
     );
 
-    particleSensor.setPulseAmplitudeRed(0x1F);
-    particleSensor.setPulseAmplitudeIR(0x1F);
-    particleSensor.setPulseAmplitudeGreen(0);
+    sensor.setPulseAmplitudeRed(0x1F);
+    sensor.setPulseAmplitudeIR(0x1F);
+    sensor.setPulseAmplitudeGreen(0);
 
     Serial.println("MAX30102 detected");
   } else {
     Serial.println("ERROR: MAX30102 not detected");
   }
-
+/**
   Serial.println(
     "Time(ms),Ax(m/s^2),Ay(m/s^2),Az(m/s^2),"
     "Gx(deg/s),Gy(deg/s),Gz(deg/s),"
     "Distance(cm),BPM,AvgBPM,Motor"
   );
+  */
 }
 
 void loop() {
@@ -267,6 +260,7 @@ void loop() {
   previousNearObject = nearObject;
 
   // ---------------- ONE-LINE OUTPUT ----------------
+  /**
   Serial.print("Time(ms)=");
   Serial.print(millis());
 
@@ -311,6 +305,7 @@ void loop() {
 
   Serial.print(", Motor=");
   Serial.println(motorActive ? "ON" : "OFF");
+  */
 
   // ---------------- MQTT PUBLISH ----------------
   if (millis() - lastMqttPublish >= MQTT_INTERVAL_MS) {
@@ -339,7 +334,6 @@ void loop() {
       Serial.println(payload);
     }
   }
-  delay(500);
 }
 
 void onMqttConnect(esp_mqtt_client_handle_t client)
