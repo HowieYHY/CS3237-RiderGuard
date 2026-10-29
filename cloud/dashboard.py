@@ -14,6 +14,7 @@ def fmt(doc):
     return {
         "topic": doc["topic"],
         "time": datetime.fromtimestamp(doc["received_at"]).strftime("%H:%M:%S"),
+        "label": doc.get("label") or "",
         "data": json.dumps(doc["data"]),
     }
 
