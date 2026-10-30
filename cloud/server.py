@@ -32,15 +32,17 @@ def on_connect(client, userdata, flags, rc):
 
 
 def on_message(client, userdata, message):
-    payload = message.payload.decode("utf-8")
+    payload = message.payload.decode("utf-8", errors="replace")
     try:
         data = json.loads(payload)
     except json.JSONDecodeError:
-        data = {"raw": payload}  # e.g. helmet LiDAR raw hex
+        data = None
+    if not isinstance(data, dict):
+        data = {"raw": payload}  # non-JSON or bare value, e.g. a test publish from mosquitto_pub
 
     if message.topic == LABEL_TOPIC:
         # accepts {"label": "safe"} or plain text "safe"; null/empty clears the label
-        userdata["label"] = (data.get("label", data.get("raw")) if isinstance(data, dict) else data) or None
+        userdata["label"] = data.get("label", data.get("raw")) or None
         print(f"Label set to: {userdata['label']}")
         return
 

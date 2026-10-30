@@ -11,9 +11,16 @@
 const char *ssid = "YOUR_WIFI_SSID";
 const char *pass = "YOUR_WIFI_PASSWORD";
 char *server = "mqtt://YOUR_IP_ADDRESS:1883";
-
 char *publishTopic = "riderguard/location";
+char *cmdTopic = "riderguard/cmd/helmet";      // latency_server.py reply, echoes seq/t_ms
+char *latencyTopic = "riderguard/latency";     // round-trip results, stored by server.py
 ESP32MQTTClient mqttClient;
+
+// ---------------- LATENCY ----------------
+unsigned long seq = 0;
+volatile bool gotCmd = false;                  // set in MQTT callback, handled in loop()
+volatile unsigned long cmdLatencyMs = 0;
+volatile unsigned long cmdSeq = 0;
 
 // ---------------- PIN DEFINITIONS ----------------
 const uint8_t LIDAR_TX_PIN = 17;
@@ -195,7 +202,7 @@ void publishData(LocationSource source) {
   if (WiFi.status() != WL_CONNECTED || !mqttClient.isConnected()) return;
   const bool valid = source == SOURCE_GPS;
   const bool lidarFresh = scanAvailable && millis() - lastScanTime <= SCAN_TIMEOUT_MS;
-  char payload[320];
+  char payload[360];
   char latitude[24], longitude[24], altitude[20], speed[20];
   char satellites[12], distance[20], angle[20];
 
@@ -220,9 +227,11 @@ void publishData(LocationSource source) {
   const char *lidarStatus = !lidarFresh ? "NO SCAN DATA" :
                             reportedDistance < 0 ? "NO VALID RETURN" : "SCANNING";
   snprintf(payload, sizeof(payload),
-    "{\"gps_status\":\"%s\",\"location_valid\":%s,\"latitude\":%s,\"longitude\":%s,"
+    "{\"seq\":%lu,\"t_ms\":%lu,"
+    "\"gps_status\":\"%s\",\"location_valid\":%s,\"latitude\":%s,\"longitude\":%s,"
     "\"altitude_m\":%s,\"speed_kmph\":%s,\"satellites\":%s,\"lidar_status\":\"%s\","
     "\"nearest_distance_cm\":%s,\"nearest_angle_deg\":%s}",
+    seq++, millis(),
     gpsIsFresh() ? "FIX" : "NO FIX", valid ? "true" : "false",
     latitude, longitude, altitude, speed, satellites, lidarStatus, distance, angle);
   mqttClient.publish(publishTopic, payload, 0, false);
@@ -299,9 +308,35 @@ void loop() {
     publishData(source);
     printCombinedData(source);
   }
+
+  // ---------------- CLOUD REPLY (latency) ----------------
+  if (gotCmd) {
+    gotCmd = false;
+    Serial.print("ROUND TRIP seq "); Serial.print(cmdSeq);
+    Serial.print(": "); Serial.print(cmdLatencyMs); Serial.println(" ms");
+
+    char latencyPayload[96];
+    snprintf(latencyPayload, sizeof(latencyPayload),
+             "{\"node\":\"helmet\",\"seq\":%lu,\"rtt_ms\":%lu}", cmdSeq, cmdLatencyMs);
+    mqttClient.publish(latencyTopic, latencyPayload, 0, false);
+  }
 }
 
-void onMqttConnect(esp_mqtt_client_handle_t client) { Serial.println("MQTT CONNECTED!"); }
+void onMqttConnect(esp_mqtt_client_handle_t client) {
+  Serial.println("MQTT CONNECTED!");
+  if (mqttClient.isMyTurn(client)) {
+    // Older library versions use (const String &payload) instead
+    mqttClient.subscribe(cmdTopic, [](const std::string &payload) {
+      unsigned long now = millis();
+      const char *t = strstr(payload.c_str(), "\"t_ms\":");
+      const char *s = strstr(payload.c_str(), "\"seq\":");
+      if (t == NULL || s == NULL) return;  // reply without timestamps
+      cmdLatencyMs = now - strtoul(t + 7, NULL, 10);
+      cmdSeq = strtoul(s + 6, NULL, 10);
+      gotCmd = true;
+    });
+  }
+}
 #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)
 esp_err_t handleMQTT(esp_mqtt_event_handle_t event) {
   mqttClient.onEventCallback(event);

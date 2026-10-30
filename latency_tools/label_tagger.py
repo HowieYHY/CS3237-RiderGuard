@@ -33,6 +33,7 @@ if __name__ == "__main__":
 
     print("Type a label (e.g. safe, abrupt_turn, object_close) and press Enter to START it.")
     print("Press Enter on an empty line to STOP. Type q to quit.")
+    print("Add seconds to auto-stop, e.g. 'abrupt_turn 10'.")
     current = None
     while True:
         text = input("label> ").strip()
@@ -42,8 +43,16 @@ if __name__ == "__main__":
         if text == "q":
             break
         if text:
-            send(client, text, "start")
-            current = text
+            label, _, secs = text.partition(" ")
+            send(client, label, "start")
+            current = label
+            if secs.strip().isdigit():
+                try:
+                    time.sleep(int(secs))
+                except KeyboardInterrupt:
+                    print("  stopped early")  # Ctrl+C ends the run but keeps the tagger open
+                send(client, current, "stop")
+                current = None
 
     time.sleep(0.5)
     client.loop_stop()

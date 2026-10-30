@@ -11,14 +11,25 @@
 // ---------------- MQTT SETTINGS ----------------
 const char *ssid = "YOUR_WIFI_SSID";
 const char *pass = "YOUR_WIFI_PASSWORD";
+
+// Use your laptop's reachable IPv4 address
 char *server = "mqtt://YOUR_IP_ADDRESS:1883";
 
 char *publishTopic = "riderguard/leftGloveMPU6050";
+char *cmdTopic = "riderguard/cmd/leftGlove";    // ml/predict.py reply, echoes seq/t_ms
+char *latencyTopic = "riderguard/latency";       // round-trip results, stored by server.py
 
 ESP32MQTTClient mqttClient;
 
 const unsigned long MQTT_INTERVAL_MS = 500;
 unsigned long lastMqttPublish = 0;
+
+// ---------------- LATENCY ----------------
+unsigned long seq = 0;
+volatile bool gotCmd = false;              // set in MQTT callback, handled in loop()
+volatile unsigned long cmdLatencyMs = 0;
+volatile unsigned long cmdSeq = 0;
+volatile bool cmdVibrate = false;
 
 // ---------------- PIN DEFINITIONS ----------------
 #define MPU_ADDR       0x68
@@ -347,6 +358,29 @@ void loop() {
 
   previousNearObject = nearObject;
 
+  // ---------------- CLOUD REPLY (latency + ML warning) ----------------
+  if (gotCmd) {
+    gotCmd = false;
+
+    Serial.print("ROUND TRIP seq ");
+    Serial.print(cmdSeq);
+    Serial.print(": ");
+    Serial.print(cmdLatencyMs);
+    Serial.println(" ms");
+
+    char latencyPayload[96];
+    snprintf(latencyPayload, sizeof(latencyPayload),
+             "{\"node\":\"leftGlove\",\"seq\":%lu,\"rtt_ms\":%lu}",
+             cmdSeq, cmdLatencyMs);
+    mqttClient.publish(latencyTopic, latencyPayload, 0, false);
+
+    if (cmdVibrate && !motorActive) {
+      digitalWrite(MOTOR_PIN, HIGH);
+      motorActive = true;
+      motorStartTime = millis();
+    }
+  }
+
   // ---------------- SERIAL OUTPUT ----------------
   Serial.print("Time(ms)=");
   Serial.print(millis());
@@ -391,10 +425,12 @@ void loop() {
     snprintf(
       payload,
       sizeof(payload),
-      "{\"ax\":%.3f,\"ay\":%.3f,\"az\":%.3f,"
+      "{\"seq\":%lu,\"t_ms\":%lu,"
+      "\"ax\":%.3f,\"ay\":%.3f,\"az\":%.3f,"
       "\"gx\":%.3f,\"gy\":%.3f,\"gz\":%.3f,"
       "\"distance_cm\":%.2f,"
       "\"motor\":\"%s\"}",
+      seq++, millis(),
       ax, ay, az,
       gx, gy, gz,
       distance,
@@ -415,6 +451,22 @@ void loop() {
 // ---------------- MQTT CALLBACK ----------------
 void onMqttConnect(esp_mqtt_client_handle_t client) {
   Serial.println("MQTT CONNECTED!");
+
+  if (mqttClient.isMyTurn(client)) {
+    // Older library versions use (const String &payload) instead
+    mqttClient.subscribe(cmdTopic, [](const std::string &payload) {
+      unsigned long now = millis();
+      const char *t = strstr(payload.c_str(), "\"t_ms\":");
+      const char *s = strstr(payload.c_str(), "\"seq\":");
+      if (t == NULL || s == NULL) {
+        return;  // reply without timestamps
+      }
+      cmdLatencyMs = now - strtoul(t + 7, NULL, 10);
+      cmdSeq = strtoul(s + 6, NULL, 10);
+      cmdVibrate = strstr(payload.c_str(), "\"vibrate\"") != NULL;
+      gotCmd = true;
+    });
+  }
 }
 
 #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)

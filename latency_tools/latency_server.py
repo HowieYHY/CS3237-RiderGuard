@@ -9,6 +9,7 @@ DISTANCE_TOPICS = {
     "riderguard/leftGloveMPU6050": "leftGlove",
     "riderguard/rightGloveMPU6050": "rightGlove",
     "riderguard/helmetLIDAR": "helmet",
+    "riderguard/location": "helmet",  # current helmet sketch: GPS + LiDAR, nearest_distance_cm
 }
 LANE_TOPIC = "riderguard/laneCheck"
 FEEDBACK_TOPIC = "riderguard/feedback"
@@ -39,7 +40,7 @@ def handle(client, userdata, message):
     data = json.loads(message.payload.decode("utf-8"))
 
     if message.topic in userdata["topics"]:
-        distance = data.get("distance_cm")
+        distance = data.get("distance_cm", data.get("nearest_distance_cm"))
         if distance is None or distance < 0:
             print(message.topic, "skipped, no valid distance_cm")
             return
