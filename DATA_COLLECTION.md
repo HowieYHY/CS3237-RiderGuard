@@ -15,9 +15,9 @@ Helmet      ─┘                    ▲
 
 | Device | Sketch | Topic | Rate |
 |---|---|---|---|
-| Left glove | `firmware/RiderGuard_Left_glove/RiderGuard_Left_glove.ino` | `riderguard/leftGloveMPU6050` | ~2 / s |
-| Right glove | `firmware/RiderGuard_Right_glove/RiderGuard_Right_glove.ino` | `riderguard/rightGloveMPU6050` | ~1 / s |
-| Helmet | `firmware/RiderGuard_Helmet/RiderGuard_Helmet.ino` | `riderguard/location` | 1 / s |
+| Left glove | `RiderGuard_Left_glove/RiderGuard_Left_glove.ino` | `riderguard/leftGloveMPU6050` | ~2 / s |
+| Right glove | `RiderGuard_Right_glove/RiderGuard_Right_glove.ino` | `riderguard/rightGloveMPU6050` | ~1 / s |
+| Helmet | `RiderGuard_Helmet/RiderGuard_Helmet.ino` | `riderguard/location` | 1 / s |
 
 ---
 
@@ -71,19 +71,19 @@ The sketches in the repo contain **placeholders**, not real network details. Fil
    |---|---|---|
    | `YOUR_WIFI_SSID` | hotspot / Wi-Fi name | `"MyHotspot"` |
    | `YOUR_WIFI_PASSWORD` | its password | `"secret123"` |
-   | `YOUR_LAPTOP_IP` | laptop IPv4 from step 1 (keep `mqtt://` and `:1883`) | `"mqtt://<laptop IPv4>:1883"` |
+   | `YOUR_IP_ADDRESS` | laptop IPv4 from step 1 (keep `mqtt://` and `:1883`) | `"mqtt://<laptop IPv4>:1883"` |
 
    ```cpp
    const char *ssid = "YOUR_WIFI_SSID";
    const char *pass = "YOUR_WIFI_PASSWORD";        // right glove: *password
-   char *server = "mqtt://YOUR_LAPTOP_IP:1883";
+   char *server = "mqtt://YOUR_IP_ADDRESS:1883";
    ```
 3. Upload each sketch to its device. Serial Monitor (115200) shows the ESP32's IP once Wi-Fi connects and `MQTT CONNECTED!` once it reaches the broker.
 
 If the laptop's IP changes (different network, reconnect), update `server` in all three and re-upload.
 To keep your values out of git:
 ```
-git update-index --skip-worktree firmware/RiderGuard_Left_glove/RiderGuard_Left_glove.ino firmware/RiderGuard_Right_glove/RiderGuard_Right_glove.ino firmware/RiderGuard_Helmet/RiderGuard_Helmet.ino
+git update-index --skip-worktree RiderGuard_Left_glove/RiderGuard_Left_glove.ino RiderGuard_Right_glove/RiderGuard_Right_glove.ino RiderGuard_Helmet/RiderGuard_Helmet.ino
 ```
 (undo with `--no-skip-worktree` before pulling changes to those files).
 

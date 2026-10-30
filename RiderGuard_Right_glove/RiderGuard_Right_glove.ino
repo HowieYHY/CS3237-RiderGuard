@@ -8,7 +8,7 @@
 // ---------------- WIFI / MQTT ----------------
 const char *ssid = "YOUR_WIFI_SSID";
 const char *password = "YOUR_WIFI_PASSWORD";
-char *server = "mqtt://YOUR_LAPTOP_IP:1883";
+char *server = "mqtt://YOUR_IP_ADDRESS:1883";
 
 const char *mqttTopic = "riderguard/rightGloveMPU6050";
 char *cmdTopic = "riderguard/cmd/rightGlove";   // ml/predict.py reply, echoes seq/t_ms

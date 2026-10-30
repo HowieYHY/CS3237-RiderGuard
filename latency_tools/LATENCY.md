@@ -42,7 +42,7 @@ assuming uplink ≈ downlink. Server processing is already inside both RTTs.
 
 ## Running the test
 
-Prerequisites: broker and `python cloud/server.py --mongo` running, all three devices on the latency firmware in `firmware/` (their readings in the server terminal contain `seq` and `t_ms`), and trained models (see DATA_COLLECTION.md section 6).
+Prerequisites: broker and `python cloud/server.py --mongo` running, all three devices on the latency firmware in the `RiderGuard_*/` folders (their readings in the server terminal contain `seq` and `t_ms`), and trained models (see DATA_COLLECTION.md section 6).
 
 One terminal each, from the repo folder:
 ```
@@ -110,7 +110,7 @@ Interpretation:
 
 | File | Role |
 |---|---|
-| `firmware/*/*.ino` | add `seq`/`t_ms`, subscribe to `riderguard/cmd/<node>`, publish `riderguard/latency` |
+| `RiderGuard_*/RiderGuard_*.ino` | add `seq`/`t_ms`, subscribe to `riderguard/cmd/<node>`, publish `riderguard/latency` |
 | `ml/predict.py` | glove responder: classifies a window, replies with `seq`/`t_ms` echoed |
 | `latency_tools/latency_server.py`, `decision.py` | helmet responder: distance rule, replies with `seq`/`t_ms` echoed |
 | `latency_tools/latency_report.py` | summary statistics, node-to-node estimate, histograms |

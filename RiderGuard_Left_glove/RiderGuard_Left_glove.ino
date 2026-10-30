@@ -13,7 +13,7 @@ const char *ssid = "YOUR_WIFI_SSID";
 const char *pass = "YOUR_WIFI_PASSWORD";
 
 // Use your laptop's reachable IPv4 address
-char *server = "mqtt://YOUR_LAPTOP_IP:1883";
+char *server = "mqtt://YOUR_IP_ADDRESS:1883";
 
 char *publishTopic = "riderguard/leftGloveMPU6050";
 char *cmdTopic = "riderguard/cmd/leftGlove";    // ml/predict.py reply, echoes seq/t_ms

@@ -10,7 +10,7 @@
 // ---------------- NETWORK SETTINGS ----------------
 const char *ssid = "YOUR_WIFI_SSID";
 const char *pass = "YOUR_WIFI_PASSWORD";
-char *server = "mqtt://YOUR_LAPTOP_IP:1883";
+char *server = "mqtt://YOUR_IP_ADDRESS:1883";
 char *publishTopic = "riderguard/location";
 char *cmdTopic = "riderguard/cmd/helmet";      // latency_server.py reply, echoes seq/t_ms
 char *latencyTopic = "riderguard/latency";     // round-trip results, stored by server.py
