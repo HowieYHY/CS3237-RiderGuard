@@ -103,31 +103,48 @@ Optional dashboard: `python cloud/dashboard.py` → http://localhost:3237
 
 ## 4. Record labelled data
 
+Record with **all three devices on** for every run: the model uses both gloves and the helmet together.
+
+Classes:
+
+| Label | Ride |
+|---|---|
+| `safe` | normal riding: normal turns, normal braking, steady speed. **Needed** – without it the model can only answer with a hazard |
+| `abrupt_turn` | sharp, sudden turn (`abrupt_left_turn` / `abrupt_right_turn` are also accepted and counted as `abrupt_turn`) |
+| `hardbrake` | hard braking. Start the label just **before** braking so the speed drop is inside the run |
+| `uneven_road` | riding over an uneven surface |
+| `speeding` | riding fast |
+| `unsafe_following_distance` | riding close behind someone/something in front |
+
 In terminal 3, alternate the actions. A number after the label stops it automatically after that many seconds:
 ```
-label> safe 20          normal riding: gentle steering, small movements, holding still
-label> abrupt_turn 10   sharp, sudden turns
-label> hard_break 10    hard braking
+label> safe 20
+label> abrupt_turn 10
+label> speeding 15
+label> hardbrake 10
 label> safe 20
 ...
 label> q                quit (always use q, never just close the window)
 ```
-- Repeat for **about 15 rounds**. The model splits train/test by run, so many short runs are better than a few long ones.
+- Aim for **at least 6 runs per class**, `safe` included. The model splits train/test by run, so many short runs are better than a few long ones, and each run should be **at least 6 s** (windows are 4 s).
+- A run-order suffix is fine: `uneven_road_1`, `uneven_road_2` are two runs of `uneven_road` (training strips `_<number>`).
 - During a run do **only** that action. Ctrl+C ends a timed run early.
-- Spell labels exactly as above. A typo becomes a new class.
-- Check terminal 2 now and then: readings from every device show `[safe]` / `[abrupt_turn]` / `[hard_break]` while a run is active, and `[None]` between runs.
+- Spell labels as above. A typo becomes a new class.
+- Check terminal 2 now and then: readings from **every** device show the label (e.g. `[speeding]`) while a run is active, and `[None]` between runs. A run where the helmet was silent can't be used: run boundaries are taken from the helmet's data.
 - If the tagger window was closed without `q`, start it again and type `q`. Otherwise the last label stays active.
+
+Data recorded before 11 Nov 2026 used the old labels (`safe`, `abrupt_turn`, `hard_break`) and is outdated – don't train on it.
 
 ## 5. Export to CSV
 
 ```
 python cloud/export.py --labelled --out exports/<date>
 ```
-e.g. `python cloud/export.py --labelled --out exports/2026-11-02`
+e.g. `python cloud/export.py --labelled --out exports/2026-11-20`
 
 Creates one CSV per device:
 ```
-exports/2026-11-02/
+exports/2026-11-20/
   leftGloveMPU6050.csv    received_at, label, seq, t_ms, ax, ay, az, gx, gy, gz, distance_cm, motor
   rightGloveMPU6050.csv   received_at, label, seq, t_ms, ax, ..., distance_cm, temperature_c, temperature_valid, led
   location.csv            received_at, label, seq, t_ms, gps_status, ..., nearest_distance_cm, nearest_angle_deg
@@ -138,12 +155,24 @@ exports/2026-11-02/
 
 ## 6. Train a model (optional check)
 
+One model for all three devices. Give each session's three CSVs (left glove, right glove, helmet) with `--session`; repeat `--session` to combine sessions:
 ```
-python ml/train.py exports/<date>/leftGloveMPU6050.csv --window 4 --step 1 --out left.joblib
-python ml/train.py exports/<date>/rightGloveMPU6050.csv --window 3 --step 1 --out right.joblib
+python ml/train.py --session exports/<date>/leftGloveMPU6050.csv exports/<date>/rightGloveMPU6050.csv exports/<date>/location.csv --window 4 --step 1 --out model.joblib
+```
+e.g. two sessions:
+```
+python ml/train.py ^
+  --session exports/2026-11-20/leftGloveMPU6050.csv exports/2026-11-20/rightGloveMPU6050.csv exports/2026-11-20/location.csv ^
+  --session exports/2026-11-27/leftGloveMPU6050.csv exports/2026-11-27/rightGloveMPU6050.csv exports/2026-11-27/location.csv ^
+  --out model.joblib
 ```
 Prints windows per class, grouped cross-validation accuracy, test accuracy and a confusion matrix.
-`--window` is in samples: 4 ≈ 2 s for the left glove (2 Hz), 3 ≈ 3 s for the right glove (~1 Hz). The helmet has no IMU, so `train.py` can't use `location.csv` yet.
+- `--window` / `--step` are in **seconds** (default 4 / 1): every window takes each device's readings from the same 4 s, matched by `received_at`.
+- Labelled runs and their labels come from `location.csv`; the gloves' readings are matched to them by time, so a typo in a glove file's `label` column doesn't matter.
+- Features per window: both gloves' IMU statistics and ultrasonic distance, helmet GPS speed (incl. change over the window) and LiDAR nearest distance. GPS position is not used.
+- `--classes safe speeding hardbrake` trains on a subset.
+
+Live prediction with the trained model (replies to both gloves): `python ml/predict.py --model model.joblib`
 
 ## 7. Shut down
 

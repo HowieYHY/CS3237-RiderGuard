@@ -13,8 +13,7 @@ ESP32 sends reading ─► Wi-Fi ─► Mosquitto ─► responder decides ─�
 
 | Device | Responder | Decision in the loop | Replies |
 |---|---|---|---|
-| Left glove | `ml/predict.py --model left.joblib` | window features + SVM (`ml/features.py`) | every reading |
-| Right glove | `ml/predict.py --model right.joblib --topic riderguard/rightGloveMPU6050` | window features + SVM | every reading |
+| Both gloves | `ml/predict.py --model model.joblib` | features from all three devices + SVM (`ml/features.py`) | every `step` s (default 1 s), to both gloves |
 | Helmet | `latency_tools/latency_server.py` | nearest LiDAR point < 200 cm (`decision.py`) | only when hazard |
 
 Included: ESP32 MQTT send, Wi-Fi both ways, broker, responder processing.
@@ -30,7 +29,7 @@ Both timestamps come from the **same ESP32 clock**, so device and laptop clocks 
 4. The ESP32 prints `ROUND TRIP seq 42: 48 ms` to Serial and publishes `{"node": "helmet", "seq": 42, "rtt_ms": 48}` to `riderguard/latency`.
 5. `cloud/server.py --mongo` stores these like any other message. `latency_report.py` summarises them.
 
-`seq` starts at 0 when a device boots and goes up by 1 per reading. Each device has its own counter. A skipped `seq` = no reply for that reading (for the helmet: nothing within 200 cm).
+`seq` starts at 0 when a device boots and goes up by 1 per reading. Each device has its own counter. A skipped `seq` = no reply for that reading (for the helmet: nothing within 200 cm; for the gloves: replies come once per `step`, echoing the newest reading, so at 2 Hz roughly every second `seq` gets one).
 
 ### Node-to-node estimate
 
@@ -46,8 +45,7 @@ Prerequisites: broker and `python cloud/server.py --mongo` running, all three de
 
 One terminal each, from the repo folder:
 ```
-python ml/predict.py --model left.joblib
-python ml/predict.py --model right.joblib --topic riderguard/rightGloveMPU6050
+python ml/predict.py --model model.joblib
 python latency_tools/latency_server.py
 ```
 Watch results live:
@@ -90,6 +88,8 @@ Estimated node -> cloud -> node (one way, median RTT_A/2 + RTT_B/2, assumes upli
 
 ### Measured (30 Oct 2026, 16:20–16:32, all three devices together, phone hotspot)
 
+Measured with the earlier per-glove models (one SVM per glove, replying to every reading); not yet re-measured with the three-device model.
+
 | Device | Responder | Readings sent | RTT samples | Median | Mean (SD) | p95 | Max | < 500 ms |
 |---|---|---|---|---|---|---|---|---|
 | Left glove | ML (SVM) | 1316 | 1308 | **68 ms** | 143 (143) ms | 404 ms | 1473 ms | 98 % |
@@ -111,7 +111,7 @@ Interpretation:
 | File | Role |
 |---|---|
 | `RiderGuard_*/RiderGuard_*.ino` | add `seq`/`t_ms`, subscribe to `riderguard/cmd/<node>`, publish `riderguard/latency` |
-| `ml/predict.py` | glove responder: classifies a window, replies with `seq`/`t_ms` echoed |
+| `ml/predict.py` | glove responder: classifies a window of all three devices, replies to both gloves with `seq`/`t_ms` echoed |
 | `latency_tools/latency_server.py`, `decision.py` | helmet responder: distance rule, replies with `seq`/`t_ms` echoed |
 | `latency_tools/latency_report.py` | summary statistics, node-to-node estimate, histograms |
 | `cloud/server.py` | stores `riderguard/latency` in MongoDB |
