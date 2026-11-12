@@ -1,5 +1,6 @@
 import argparse
 import math
+import re
 import time
 from datetime import datetime
 
@@ -32,20 +33,28 @@ MAX_RESPONSE_MS = 5000
 LATENCY_TARGET_MS = 200
 SIDE_DANGER_CM = 30
 SIDE_CAUTION_CM = 60
-SPEED_LIMIT_KMPH = 60
+SPEED_LIMIT_KMPH = 18
+FOLLOW_GAP_S = 2
+MOVING_KMPH = 3
 SESSION_GAP_S = 60
 MAX_RIDE_S = 3 * 3600
 MIN_MOVE_M = 3
 EVENT_GAP_S = 3
-PENALTY = {"Hard brake": 8, "Object warning": 6, "Speeding": 6, "Sudden turn": 5, "Gap too tight to split": 4}
+PENALTY = {"Hardbrake": 8, "Unsafe following distance": 6, "Near object": 6, "Speeding": 6, "Abrupt turn": 5,
+           "Unsafe lane splitting": 4}
 DEFAULT_PENALTY = 5
 SCORE_PER_S = 600
 ALERT_TOPICS = "^riderguard/(cmd/|feedback$|location$|leftGloveMPU6050$|rightGloveMPU6050$)"
 
 session = {"start": None, "last": None}
 
-SEVERITY = {"safe": 0, "abrupt_turn": 1, "hard_break": 2}
-LABEL_NAMES = {"safe": "Riding smoothly", "abrupt_turn": "Sudden turn", "hard_break": "Hard brake"}
+SEVERITY = {"safe": 0, "uneven_road": 0, "abrupt_turn": 1, "speeding": 1, "hardbrake": 2, "unsafe_following_distance": 2}
+LABEL_NAMES = {"safe": "Safe riding", "abrupt_turn": "Abrupt turn", "hardbrake": "Hardbrake", "speeding": "Speeding",
+               "unsafe_following_distance": "Unsafe following distance", "uneven_road": "Uneven road"}
+LABEL_ALIASES = {"uneven": "uneven_road", "hard_break": "hardbrake", "hard_brake": "hardbrake",
+                 "abrupt_left_turn": "abrupt_turn", "abrupt_right_turn": "abrupt_turn"}
+NO_ALERT = {"safe", "uneven_road"}
+LABEL_KIND = {"speeding": "speed", "unsafe_following_distance": "follow"}
 
 
 def num(value):
@@ -58,8 +67,30 @@ def data_of(doc):
     return doc["data"] if doc and isinstance(doc.get("data"), dict) else {}
 
 
+def base_label(label):
+    if label is None:
+        return None
+    key = re.sub(r"_\d+$", "", str(label).strip().lower())
+    key = re.sub(r"^\d+", "", key).strip().replace(" ", "_")
+    return LABEL_ALIASES.get(key, key)
+
+
 def label_name(label):
     return LABEL_NAMES.get(label, str(label).replace("_", " ").capitalize())
+
+
+def follow_gap(speed, front_m):
+    if speed is None or front_m is None or speed < MOVING_KMPH:
+        return None
+    gap = front_m / (speed / 3.6)
+    return gap if gap < FOLLOW_GAP_S else None
+
+
+def front_distance_m(d):
+    distance_cm, angle = num(d.get("nearest_distance_cm")), num(d.get("nearest_angle_deg"))
+    if distance_cm is None or distance_cm <= 0 or angle is None or angle_gap(angle, FRONT_ANGLE_DEG) > FRONT_HALF_WIDTH_DEG:
+        return None
+    return distance_cm / 100
 
 
 def clock(ts):
@@ -118,46 +149,57 @@ def find_ride_start(now):
     return last
 
 
-def alert_kind(doc):
+def alert_kinds(doc):
     d = data_of(doc)
     if doc["topic"] in TOPIC_NODE:
         gap = num(d.get("distance_cm"))
-        return ("lane", "Gap too tight to split") if gap is not None and 0 < gap < SIDE_DANGER_CM else None
+        return [("lane", "Unsafe lane splitting")] if gap is not None and 0 < gap < SIDE_DANGER_CM else []
     if doc["topic"] == HELMET:
-        speed = num(d.get("speed_kmph"))
-        return ("speed", "Speeding") if speed is not None and speed > SPEED_LIMIT_KMPH else None
+        speed, kinds = num(d.get("speed_kmph")), []
+        if speed is not None and speed > SPEED_LIMIT_KMPH:
+            kinds.append(("speed", "Speeding"))
+        if follow_gap(speed, front_distance_m(d)) is not None:
+            kinds.append(("follow", "Unsafe following distance"))
+        return kinds
     if doc["topic"] == FEEDBACK_TOPIC:
-        return ("lane", "Gap too tight to split") if d.get("result") == "NOT_OK" else None
-    label = d.get("label")
+        return [("lane", "Unsafe lane splitting")] if d.get("result") == "NOT_OK" else []
+    label = base_label(d.get("label"))
     if label is not None:
-        return None if label == "safe" else ("riding", label_name(label))
-    return ("object", "Object warning") if d.get("action") == "vibrate" else None
+        return [] if label in NO_ALERT else [(LABEL_KIND.get(label, "riding"), label_name(label))]
+    return [("object", "Near object")] if d.get("action") == "vibrate" else []
 
 
 def group_events(docs):
-    events, open_events = [], {}
+    events, open_events, last_follow = [], {}, None
     for doc in docs:
-        kind = alert_kind(doc)
-        if kind is None:
-            continue
         t = doc["received_at"]
-        event = open_events.get(kind)
-        if event is None or t - event["end"] > EVENT_GAP_S:
-            event = {"kind": kind[0], "title": kind[1], "start": t, "end": t, "nodes": set()}
-            events.append(event)
-            open_events[kind] = event
-        event["end"] = t
-        if doc["topic"].startswith(CMD_PREFIX):
-            node = doc["topic"][len(CMD_PREFIX):]
-            event["nodes"].add(NODE_NAMES.get(node, node))
-        elif doc["topic"] in TOPIC_NODE:
-            event["nodes"].add(TOPIC_NODE[doc["topic"]])
+        for kind in alert_kinds(doc):
+            if kind[0] == "follow":
+                last_follow = t
+            elif kind[0] == "object" and last_follow is not None and t - last_follow <= EVENT_GAP_S:
+                continue
+            add_to_event(events, open_events, kind, doc)
     out = []
     for e in reversed(events):
         nodes = "both gloves" if {"left glove", "right glove"} <= e["nodes"] else " + ".join(sorted(e["nodes"]))
         out.append({"kind": e["kind"], "title": e["title"], "text": f"{e['title']} · {nodes}" if nodes else e["title"],
                     "at": e["start"], "time": clock(e["start"]), "dur": round(e["end"] - e["start"], 1)})
     return out
+
+
+def add_to_event(events, open_events, kind, doc):
+    t = doc["received_at"]
+    event = open_events.get(kind)
+    if event is None or t - event["end"] > EVENT_GAP_S:
+        event = {"kind": kind[0], "title": kind[1], "start": t, "end": t, "nodes": set()}
+        events.append(event)
+        open_events[kind] = event
+    event["end"] = t
+    if doc["topic"].startswith(CMD_PREFIX):
+        node = doc["topic"][len(CMD_PREFIX):]
+        event["nodes"].add(NODE_NAMES.get(node, node))
+    elif doc["topic"] in TOPIC_NODE:
+        event["nodes"].add(TOPIC_NODE[doc["topic"]])
 
 
 def gyro_magnitude(d):
@@ -231,12 +273,12 @@ def build_state(now):
     cmds = [d for d in docs if d["topic"].startswith(CMD_PREFIX)]
     predictions = {}
     for cmd in cmds:
-        label = data_of(cmd).get("label")
+        label = base_label(data_of(cmd).get("label"))
         if label is not None and now - cmd["received_at"] <= OFFLINE_AFTER_S:
             predictions[cmd["topic"][len(CMD_PREFIX):]] = label
     riding = max(predictions.values(), key=lambda l: SEVERITY.get(l, 1), default=None)
-    riding_recent = [data_of(c).get("label") for c in cmds if now - c["received_at"] <= HAZARD_HOLD_S
-                     and data_of(c).get("label") not in (None, "safe")]
+    riding_recent = [label for c in cmds if now - c["received_at"] <= HAZARD_HOLD_S
+                     and (label := base_label(data_of(c).get("label"))) is not None and label not in NO_ALERT]
     helmet_warned = any(c["topic"] == CMD_PREFIX + "helmet" and data_of(c).get("action") == "vibrate"
                         and now - c["received_at"] <= HAZARD_HOLD_S for c in cmds)
 
@@ -264,18 +306,22 @@ def build_state(now):
         lane_verdict = None
     speed = num(helmet.get("speed_kmph"))
     speeding = speed is not None and speed > SPEED_LIMIT_KMPH
+    gap_s = follow_gap(speed, front_m)
 
     if not any(n["online"] for n in nodes):
         status = ("idle", "No live data", "Waiting for helmet and gloves")
+    elif gap_s is not None:
+        status = ("danger", "Unsafe following distance",
+                  f"{front_m:.1f} m ahead · {gap_s:.1f} s gap · keep {FOLLOW_GAP_S} s")
     elif (nearest and nearest["close"]) or helmet_warned:
-        status = ("danger", "Object ahead", f"{front_m:.1f} m in front · slow down" if front_m else "Slow down")
+        status = ("danger", "Near object", f"{front_m:.1f} m in front · slow down" if front_m else "Slow down")
     elif riding_recent:
         worst = max(riding_recent, key=lambda l: SEVERITY.get(l, 1))
         status = ("warning", label_name(worst), "Ride smoothly and keep your distance")
     elif speeding:
-        status = ("warning", "Speeding", f"{round(speed)} km/h · limit {SPEED_LIMIT_KMPH} km/h")
+        status = ("warning", "Speeding", f"{round(speed)} km/h · limit {SPEED_LIMIT_KMPH:g} km/h")
     elif lane_verdict == "tight":
-        status = ("warning", "Gap too tight", "Not enough space to lane-split")
+        status = ("warning", "Unsafe lane splitting", "Not enough space to lane-split")
     else:
         status = ("safe", "All clear", "No hazards detected")
 
@@ -288,11 +334,12 @@ def build_state(now):
         "nearest": nearest,
         "lidar_status": helmet.get("lidar_status"),
         "riding": None if riding is None else {"key": riding, "name": label_name(riding),
-                                               "level": "safe" if riding == "safe" else "warning"},
+                                               "level": "safe" if riding in NO_ALERT else "warning"},
         "predictions": {NODE_NAMES.get(node, node): label_name(label) for node, label in predictions.items()},
         "gloves": gloves,
         "lane": {"left": lane_left, "right": lane_right, "result": lane_result, "verdict": lane_verdict},
         "speeding": speeding,
+        "follow_gap_s": None if gap_s is None else round(gap_s, 1),
         "location": None if lat is None or lon is None else {
             "lat": lat, "lon": lon, "fix": helmet.get("gps_status") == "FIX", "satellites": helmet.get("satellites")},
         "nodes": nodes,
@@ -304,6 +351,7 @@ def build_state(now):
         "ride_s": ride_s,
         "ride": live_ride(now),
         "thresholds": {"side_danger": SIDE_DANGER_CM, "side_caution": SIDE_CAUTION_CM, "warn_m": OBJECT_WARN_M,
+                       "follow_s": FOLLOW_GAP_S,
                        "speed_limit": SPEED_LIMIT_KMPH, "front_deg": FRONT_ANGLE_DEG},
     }
 
@@ -333,8 +381,9 @@ def build_summary(now):
     penalty = sum(PENALTY.get(title, DEFAULT_PENALTY) * n for title, n in counts.items())
     score = max(0, round(100 - penalty / max(duration / SCORE_PER_S, 1)))
 
-    labels = [data_of(d).get("label") for d in docs if d["topic"].startswith(CMD_PREFIX) and data_of(d).get("label")]
-    smooth = round(100 * labels.count("safe") / len(labels)) if labels else None
+    labels = [base_label(data_of(d).get("label")) for d in docs
+              if d["topic"].startswith(CMD_PREFIX) and data_of(d).get("label")]
+    smooth = round(100 * sum(l in NO_ALERT for l in labels) / len(labels)) if labels else None
 
     spots = []
     for e in events:

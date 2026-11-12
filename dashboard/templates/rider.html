@@ -234,7 +234,7 @@
                             <div class="kv"><span>Ride time</span><b id="smTime">–</b></div>
                             <div class="kv"><span>Distance</span><b id="smDist">–</b></div>
                             <div class="kv"><span>Top / average speed</span><b id="smSpeed">–</b></div>
-                            <div class="kv"><span>Smooth riding (predicted)</span><b id="smSmooth">–</b></div>
+                            <div class="kv"><span>Safe riding (predicted)</span><b id="smSmooth">–</b></div>
                         </div>
                     </div>
                     <div class="smcols">
@@ -313,9 +313,10 @@
                 riding: { color: "var(--warn)", icon: '<path d="M4 18c4-1 6-5 8-9s5-5 8-5"/><path d="M16 4h4v4"/>' },
                 object: { color: "var(--danger)", icon: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4M12 15.5v.5"/>' },
                 lane: { color: "var(--accent)", icon: '<path d="M7 3v18M17 3v18M12 6v3M12 12v3M12 18v2"/>' },
-                speed: { color: "#c084fc", icon: '<path d="M4 16a8 8 0 0 1 16 0"/><path d="M12 16l4-5"/>' }
+                speed: { color: "#c084fc", icon: '<path d="M4 16a8 8 0 0 1 16 0"/><path d="M12 16l4-5"/>' },
+                follow: { color: "var(--danger)", icon: '<rect x="4" y="13" width="6" height="6" rx="1.5"/><rect x="14" y="5" width="6" height="6" rx="1.5"/><path d="M9 11l4-4M13 7h-3M13 7v3"/>' }
             };
-            const SHORT = { safe: "Smooth", abrupt_turn: "Sudden turn", hard_break: "Hard brake" };
+            const SHORT = { safe: "Safe", unsafe_following_distance: "Too close" };
             let view = "ride";
             const $ = id => document.getElementById(id);
             const fmt = (v, d = 0) => v === null || v === undefined ? "–" : Number(v).toFixed(d);
@@ -414,7 +415,7 @@
                 $("qLane").textContent = lv === "ok" ? "OK" : lv === "tight" ? "Too tight" : "–";
 
                 drawMotion(s);
-                $("ridingNote").textContent = !s.riding ? "Waiting for riding predictions" : s.riding.key === "safe" ? "Riding style: smooth and steady" : `${s.riding.name} detected`;
+                $("ridingNote").textContent = !s.riding ? "Waiting for riding predictions" : s.riding.level === "safe" ? "Safe riding" : `${s.riding.name} detected`;
 
                 $("alertCount").textContent = s.alert_count;
                 $("alerts").innerHTML = s.events.length ? "" : '<p class="empty">No alerts this ride</p>';
@@ -455,6 +456,7 @@
                     ["Nearest object", n ? `${fmt(n.m, 2)} m at ${fmt(n.angle)}°` : "–", ""],
                     ["Lane split", s.lane.verdict === "ok" ? "OK to split" : s.lane.verdict === "tight" ? "Too tight" : "No reading", s.lane.verdict === "tight" ? "bad" : s.lane.verdict === "ok" ? "ok" : ""],
                     ["Speed limit", `${s.thresholds.speed_limit} km/h`, s.speeding ? "bad" : ""],
+                    ["Following gap", s.follow_gap_s === null ? `OK (keep ${s.thresholds.follow_s} s)` : `${s.follow_gap_s} s · too close`, s.follow_gap_s === null ? "" : "bad"],
                     ["LiDAR front angle", `${s.thresholds.front_deg}°`, ""],
                     ["GPS", s.location ? `${s.location.fix ? "Fix" : "No fix"} · ${s.location.satellites ?? 0} sats` : "No fix", ""],
                     ["Response time", s.latency.last === null ? "–" : `${s.latency.last} ms (avg ${s.latency.avg}, max ${s.latency.max})`, ""],
@@ -484,7 +486,8 @@
             }
 
             let summaryTimer = null;
-            const KIND_OF = { "Object warning": "object", "Gap too tight to split": "lane", "Speeding": "speed" };
+            const KIND_OF = { "Near object": "object", "Unsafe lane splitting": "lane", "Speeding": "speed",
+                              "Unsafe following distance": "follow" };
 
             function project(track, w, h, pad) {
                 const lats = track.map(p => p[0]), lons = track.map(p => p[1]);
