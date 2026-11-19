@@ -8,9 +8,9 @@
 #include <math.h>
 
 // ---------------- NETWORK SETTINGS ----------------
-const char *ssid = "YOUR_WIFI_SSID";
-const char *pass = "YOUR_WIFI_PASSWORD";
-char *server = "mqtt://YOUR_IP_ADDRESS:1883";
+const char *ssid = "WiFI_Name";
+const char *password = "WiFi_Password";
+char *server = "mqtt://hosting_ip:1883";
 
 char *publishTopic = "riderguard/location";
 ESP32MQTTClient mqttClient;
@@ -22,7 +22,7 @@ const uint8_t GPS_RX_PIN = 26;
 const uint8_t GPS_TX_PIN = 27;
 
 // ---------------- SETTINGS ----------------
-const unsigned long REPORT_INTERVAL_MS = 1000;
+const unsigned long REPORT_INTERVAL_MS = 300;
 const unsigned long SCAN_TIMEOUT_MS = 2000;
 const unsigned long GPS_MAX_AGE_MS = 5000;
 const unsigned long LOCATION_STALE_AFTER_MS = 30000;
@@ -247,7 +247,7 @@ void setup() {
   GPSSerial.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
 
   WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, pass);
+  WiFi.begin(ssid, password);
   Serial.println("Connecting to Wi-Fi in background");
   lastWifiAttempt = millis();
   mqttClient.setURI(server);

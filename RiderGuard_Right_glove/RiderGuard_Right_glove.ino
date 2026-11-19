@@ -6,13 +6,16 @@
 #include "ESP32MQTTClient.h"
 
 // ---------------- WIFI / MQTT ----------------
-const char *ssid = "YOUR_WIFI_SSID";
-const char *pass = "YOUR_WIFI_PASSWORD";
-char *server = "mqtt://YOUR_IP_ADDRESS:1883";
+const char *ssid = "WiFI_Name";
+const char *password = "WiFi_Password";
+char *server = "mqtt://hosting_ip:1883";
 
-const char *mqttTopic = "riderguard/rightGloveMPU6050";
+const char *publishTopic = "riderguard/rightGloveMPU6050";
 
 ESP32MQTTClient mqttClient;
+
+const unsigned long MQTT_INTERVAL_MS = 300;
+unsigned long lastMqttPublish = 0;
 
 // ---------------- PIN DEFINITIONS ----------------
 #define MPU_ADDR 0x68
@@ -27,11 +30,12 @@ const float GYRO_SENSITIVITY = 131.0;
 const float GRAVITY = 9.80665;
 
 // ---------------- OTHER SETTINGS ----------------
-const float DISTANCE_THRESHOLD_CM = 30.0;
+const float DISTANCE_THRESHOLD_CM = 300.0;
+const float DETECTION_THRESHOLD_CM = 60.0;
 
 // DS18B20
-OneWire oneWire(DS18B20_PIN);
-DallasTemperature tempSensor(&oneWire);
+//OneWire oneWire(DS18B20_PIN);
+//DallasTemperature tempSensor(&oneWire);
 
 // Read two consecutive registers as a signed 16-bit value
 int16_t read16(byte reg) {
@@ -54,10 +58,32 @@ int16_t read16(byte reg) {
 
 void setup() {
   Serial.begin(115200);
+
+  // ---------------- WIFI + MQTT ----------------
+  WiFi.begin(ssid, password);
+
+  Serial.print("Connecting to hotspot");
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.print("WiFi connected. ESP32 IP: ");
+  Serial.println(WiFi.localIP());
+
+  mqttClient.setURI(server);
+  mqttClient.enableDebuggingMessages();
+  mqttClient.setKeepAlive(30);
+  mqttClient.loopStart();
+
+  Serial.println("MQTT client started");
   delay(500);
 
   // I2C for MPU6050
   Wire.begin(21, 22);
+  Wire.setClock(100000); //I2C_SPEED_STANDARD = 100000
 
   // Wake MPU6050
   Wire.beginTransmission(MPU_ADDR);
@@ -90,34 +116,13 @@ void setup() {
   // LED
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
-
+/**
   // DS18B20
   tempSensor.begin();
   Serial.print("DS18B20 devices found: ");
   Serial.println(tempSensor.getDeviceCount());
   tempSensor.setResolution(10);
-
-  // ---------------- WIFI ----------------
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to hotspot");
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  Serial.println();
-  Serial.print("WiFi connected. ESP32 IP: ");
-  Serial.println(WiFi.localIP());
-
-  // ---------------- MQTT ----------------
-  mqttClient.setURI(server);
-  mqttClient.enableDebuggingMessages();
-  mqttClient.setKeepAlive(30);
-  mqttClient.loopStart();
-
-  Serial.println("MQTT client started");
-
+*/
   Serial.println(
     "Time(ms),Ax,Ay,Az,Gx,Gy,Gz,Distance(cm),Temp(C),LED"
   );
@@ -145,6 +150,7 @@ void loop() {
   float gz = gzRaw / GYRO_SENSITIVITY;
 
   // -------- HC-SR04 distance --------
+
   digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(2);
   digitalWrite(TRIG_PIN, HIGH);
@@ -158,6 +164,7 @@ void loop() {
     distance = duration * 0.0343 / 2.0;
   }
 
+/**
   // -------- DS18B20 temperature --------
   tempSensor.requestTemperatures();
   float temperature = tempSensor.getTempCByIndex(0);
@@ -166,11 +173,11 @@ void loop() {
       temperature != DEVICE_DISCONNECTED_C &&
       temperature > -55.0 &&
       temperature <= 125.0;
-
+*/
   // -------- LED control --------
   bool nearObject =
       distance >= 0.0 &&
-      distance < DISTANCE_THRESHOLD_CM;
+      distance < DETECTION_THRESHOLD_CM;
 
   digitalWrite(LED_PIN, nearObject ? HIGH : LOW);
 
@@ -199,44 +206,60 @@ void loop() {
   Serial.print(", Distance(cm)=");
   if (distance >= 0.0) {
     Serial.print(distance, 2);
-  } else {
+  }
+  else if(distance >= DISTANCE_THRESHOLD_CM){
     Serial.print("INVALID");
   }
-
-  Serial.print(", Temp(C)=");
-  if (temperatureValid) {
-    Serial.print(temperature, 2);
-  } else {
-    Serial.print("INVALID");
-  }
-
+  
   Serial.print(", LED=");
   Serial.println(nearObject ? "ON" : "OFF");
 
   // -------- MQTT JSON payload --------
-  char payload[256];
+  if (millis() - lastMqttPublish >= MQTT_INTERVAL_MS) {
+    lastMqttPublish = millis();
 
-  snprintf(
-    payload,
-    sizeof(payload),
-    "{\"ax\":%.3f,\"ay\":%.3f,\"az\":%.3f,"
-    "\"gx\":%.3f,\"gy\":%.3f,\"gz\":%.3f,"
-    "\"distance_cm\":%.2f,\"temperature_c\":%.2f,"
-    "\"temperature_valid\":%s,\"led\":\"%s\"}",
-    ax, ay, az,
-    gx, gy, gz,
-    distance,
-    temperatureValid ? temperature : -127.0,
-    temperatureValid ? "true" : "false",
-    nearObject ? "ON" : "OFF"
-  );
+    char payload[256];
 
-  mqttClient.publish(mqttTopic, payload, 0, false);
+    snprintf(
+      payload,
+      sizeof(payload),
+      "{\"ax\":%.3f,\"ay\":%.3f,\"az\":%.3f,"
+      "\"gx\":%.3f,\"gy\":%.3f,\"gz\":%.3f,"
+      "\"distance_cm\":%.2f,"
+      "\"led\":\"%s\"}",
+      ax, ay, az,
+      gx, gy, gz,
+      distance,
+      nearObject ? "ON" : "OFF"
+    );
 
-  Serial.print("MQTT publish attempted: ");
-  Serial.println(payload);
 
-  delay(500);
+  /**
+    snprintf(
+      payload,
+      sizeof(payload),
+      "{\"ax\":%.3f,\"ay\":%.3f,\"az\":%.3f,"
+      "\"gx\":%.3f,\"gy\":%.3f,\"gz\":%.3f,"
+      "\"distance_cm\":%.2f,\"temperature_c\":%.2f,"
+      "\"temperature_valid\":%s,\"led\":\"%s\"}",
+      ax, ay, az,
+      gx, gy, gz,
+      distance,
+      temperatureValid ? temperature : -127.0,
+      temperatureValid ? "true" : "false",
+      nearObject ? "ON" : "OFF"
+    );
+  */
+
+    if (WiFi.status() == WL_CONNECTED) {
+      mqttClient.publish(publishTopic, payload, 0, false);
+
+      Serial.print("MQTT published: ");
+      Serial.println(payload);
+    }
+  }
+  
+  delay(10);
 }
 
 // Compatibility callback used by the Lab 5 ESP32MQTTClient setup
@@ -247,11 +270,14 @@ void onMqttConnect(esp_mqtt_client_handle_t client) {
 }
 
 #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)
+
 esp_err_t handleMQTT(esp_mqtt_event_handle_t event) {
   mqttClient.onEventCallback(event);
   return ESP_OK;
 }
+
 #else
+
 void handleMQTT(
     void *handler_args,
     esp_event_base_t base,
@@ -261,4 +287,5 @@ void handleMQTT(
   auto *event = static_cast<esp_mqtt_event_handle_t>(event_data);
   mqttClient.onEventCallback(event);
 }
+
 #endif
