@@ -8,9 +8,9 @@
 #include <math.h>
 
 // ---------------- NETWORK SETTINGS ----------------
-const char *ssid = "WiFI_Name";
-const char *password = "WiFi_Password";
-char *server = "mqtt://hosting_ip:1883";
+const char *ssid = "YOUR_WIFI_SSID";
+const char *pass = "YOUR_WIFI_PASSWORD";
+char *server = "mqtt://HOSTING_IP_ADDRESS:1883";
 
 char *publishTopic = "riderguard/location";
 ESP32MQTTClient mqttClient;
