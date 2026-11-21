@@ -11,13 +11,13 @@
 // ---------------- MQTT SETTINGS ----------------
 const char *ssid = "YOUR_WIFI_SSID";
 const char *pass = "YOUR_WIFI_PASSWORD";
-char *server = "mqtt://YOUR_IP_ADDRESS:1883";
+char *server = "mqtt://HOSTING_IP_ADDRESS:1883";
 
 char *publishTopic = "riderguard/leftGloveMPU6050";
 
 ESP32MQTTClient mqttClient;
 
-const unsigned long MQTT_INTERVAL_MS = 500;
+const unsigned long MQTT_INTERVAL_MS = 300;
 unsigned long lastMqttPublish = 0;
 
 // ---------------- PIN DEFINITIONS ----------------
@@ -32,36 +32,15 @@ const float GYRO_SENSITIVITY  = 131.0;
 const float GRAVITY           = 9.80665;
 
 // ---------------- OTHER SETTINGS ----------------
-const float DISTANCE_THRESHOLD_CM = 30.0;
+const float DISTANCE_THRESHOLD_CM = 300.0;
+const float DETECTION_THRESHOLD_CM = 60.0;
 const unsigned long MOTOR_PULSE_MS = 200;
-
-// ---------------- MAX30102 DISABLED ----------------
-// MAX30105 sensor;
-
-// const byte RATE_SIZE = 5;
-// byte rates[RATE_SIZE] = {0};
-
-// byte rateSpot = 0;
-// byte validBeats = 0;
-
-// unsigned long lastBeat = 0;
-// unsigned long lastHRPrint = 0;
-
-// float bpm = 0;
-// int averageBPM = 0;
-
-// long irValue = 0;
-// bool max30102Ready = false;
-// bool fingerDetected = false;
-
-// const float MIN_BPM = 45.0;
-// const float MAX_BPM = 180.0;
-// const long IR_FINGER_THRESHOLD = 50000;
 
 // ---------------- MOTOR STATE ----------------
 bool motorActive = false;
 unsigned long motorStartTime = 0;
 bool previousNearObject = false;
+bool currCycleMotorOn = false;
 
 // Read two consecutive MPU registers
 int16_t read16(byte reg) {
@@ -111,103 +90,11 @@ float readDistanceCM() {
   return duration * 0.0343 / 2.0;
 }
 
-// ==================================================
-// MAX30102 HEART-RATE FUNCTION DISABLED
-// ==================================================
-
-// void updateHeartRate() {
-//   if (!max30102Ready) {
-//     fingerDetected = false;
-//     bpm = 0;
-//     averageBPM = 0;
-//     return;
-//   }
-//
-//   irValue = sensor.getIR();
-//
-//   fingerDetected = (irValue >= IR_FINGER_THRESHOLD);
-//
-//   if (!fingerDetected) {
-//     bpm = 0;
-//     averageBPM = 0;
-//
-//     lastBeat = 0;
-//     rateSpot = 0;
-//     validBeats = 0;
-//
-//     for (byte i = 0; i < RATE_SIZE; i++) {
-//       rates[i] = 0;
-//     }
-//
-//     return;
-//   }
-//
-//   if (checkForBeat(irValue)) {
-//     unsigned long now = millis();
-//
-//     if (lastBeat == 0) {
-//       lastBeat = now;
-//       return;
-//     }
-//
-//     unsigned long timeBetweenBeats = now - lastBeat;
-//     lastBeat = now;
-//
-//     if (timeBetweenBeats == 0) {
-//       return;
-//     }
-//
-//     float measuredBPM = 60000.0 / timeBetweenBeats;
-//
-//     if (measuredBPM >= MIN_BPM &&
-//         measuredBPM <= MAX_BPM) {
-//
-//       bpm = measuredBPM;
-//       rates[rateSpot] = (byte)measuredBPM;
-//
-//       rateSpot++;
-//
-//       if (rateSpot >= RATE_SIZE) {
-//         rateSpot = 0;
-//       }
-//
-//       if (validBeats < RATE_SIZE) {
-//         validBeats++;
-//       }
-//
-//       if (validBeats >= RATE_SIZE) {
-//         int total = 0;
-//
-//         for (byte i = 0; i < RATE_SIZE; i++) {
-//           total += rates[i];
-//         }
-//
-//         averageBPM = total / RATE_SIZE;
-//       }
-//     }
-//   }
-//
-//   if (lastBeat != 0 &&
-//       millis() - lastBeat > 10000UL) {
-//
-//     bpm = 0;
-//     averageBPM = 0;
-//
-//     lastBeat = 0;
-//     rateSpot = 0;
-//     validBeats = 0;
-//
-//     for (byte i = 0; i < RATE_SIZE; i++) {
-//       rates[i] = 0;
-//     }
-//   }
-// }
-
 void setup() {
   Serial.begin(115200);
 
   // ---------------- WIFI + MQTT ----------------
-  WiFi.begin(ssid, pass);
+  WiFi.begin(ssid, password);
 
   Serial.print("Connecting to Wi-Fi");
 
@@ -230,7 +117,6 @@ void setup() {
 
   // ---------------- I2C ----------------
   // MPU6050 remains active.
-  // MAX30102 is not initialized.
   Wire.begin(21, 22);
   Wire.setClock(100000); //I2C_SPEED_STANDARD = 100000
 
@@ -253,22 +139,6 @@ void setup() {
   pinMode(MOTOR_PIN, OUTPUT);
   digitalWrite(MOTOR_PIN, LOW);
 
-  // ---------------- MAX30102 INITIALIZATION DISABLED ----------------
-
-  // if (sensor.begin(Wire, I2C_SPEED_FAST)) {
-  //   max30102Ready = true;
-  //
-  //   sensor.setup();
-  //   sensor.setPulseAmplitudeRed(0);
-  //
-  //   Serial.println("MAX30102 detected");
-  //   Serial.println("Place your finger on the sensor...");
-  // } else {
-  //   max30102Ready = false;
-  //   Serial.println("ERROR: MAX30102 not detected");
-  // }
-
-  Serial.println("MAX30102 disabled");
   Serial.println("MPU6050 and ultrasonic sensor active");
   Serial.println("Time(ms),Ax,Ay,Az,Gx,Gy,Gz,Distance(cm),Motor");
 }
@@ -296,56 +166,23 @@ void loop() {
 
   bool nearObject =
       distance >= 0 &&
-      distance < DISTANCE_THRESHOLD_CM;
-
-  // ---------------- HEART RATE DISABLED ----------------
-  // updateHeartRate();
-
-  // The MAX30102 heart-rate debug output is disabled.
-  //
-  // if (millis() - lastHRPrint >= 1000) {
-  //   lastHRPrint = millis();
-  //
-  //   if (!max30102Ready) {
-  //     Serial.println("MAX30102 unavailable");
-  //   }
-  //   else if (!fingerDetected) {
-  //     Serial.print("Waiting for finger... IR=");
-  //     Serial.println(irValue);
-  //   }
-  //   else if (averageBPM == 0) {
-  //     Serial.print("Measuring... keep your finger still. IR=");
-  //     Serial.print(irValue);
-  //     Serial.print(", Valid beats=");
-  //     Serial.println(validBeats);
-  //   }
-  //   else {
-  //     Serial.print("Heart Rate: ");
-  //     Serial.print(averageBPM);
-  //     Serial.print(" BPM | Current BPM: ");
-  //     Serial.print(bpm, 1);
-  //     Serial.print(" | IR: ");
-  //     Serial.println(irValue);
-  //   }
-  // }
+      distance < DETECTION_THRESHOLD_CM;
 
   // ---------------- MOTOR CONTROL ----------------
   // One short pulse on each transition into near-object state.
   // This avoids holding the motor on continuously.
-
-  if (nearObject && !previousNearObject && !motorActive) {
+  if (nearObject && !motorActive) {
     digitalWrite(MOTOR_PIN, HIGH);
     motorActive = true;
     motorStartTime = millis();
   }
 
-  if (motorActive &&
-      millis() - motorStartTime >= MOTOR_PULSE_MS) {
+  currCycleMotorOn = motorActive;
+
+  if (!nearObject || (motorActive && millis() - motorStartTime >= MOTOR_PULSE_MS)) {
     digitalWrite(MOTOR_PIN, LOW);
     motorActive = false;
   }
-
-  previousNearObject = nearObject;
 
   // ---------------- SERIAL OUTPUT ----------------
   Serial.print("Time(ms)=");
@@ -373,12 +210,13 @@ void loop() {
 
   if (distance >= 0) {
     Serial.print(distance, 2);
-  } else {
+  }
+  else if(distance >= DISTANCE_THRESHOLD_CM){
     Serial.print("INVALID");
   }
 
   Serial.print(", Motor=");
-  Serial.println(motorActive ? "ON" : "OFF");
+  Serial.println(currCycleMotorOn ? "ON" : "OFF");
 
   // ---------------- MQTT PUBLISH ----------------
   if (millis() - lastMqttPublish >= MQTT_INTERVAL_MS) {
@@ -386,8 +224,6 @@ void loop() {
 
     char payload[256];
 
-    // BPM and avg_bpm have been removed because
-    // the MAX30102 heart-rate sensor is disabled.
     snprintf(
       payload,
       sizeof(payload),
@@ -411,6 +247,9 @@ void loop() {
 
   delay(10);
 }
+
+// Compatibility callback used by the Lab 5 ESP32MQTTClient setup
+#include "esp_idf_version.h"
 
 // ---------------- MQTT CALLBACK ----------------
 void onMqttConnect(esp_mqtt_client_handle_t client) {
