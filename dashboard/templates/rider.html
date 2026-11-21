@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+        <meta name="theme-color" content="#0c0d12">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+        <title>RiderGuard</title>
+        <style>
+            :root {
+                --accent: #ff7a2f; --accent-2: #ffb15c; --text: #f4f1ee; --muted: rgba(244,241,238,.62); --faint: rgba(244,241,238,.38);
+                --glass: rgba(16,18,26,.58); --glass-line: rgba(255,255,255,.13); --safe: #3ddc97; --warn: #ffb347; --danger: #ff4d4d;
+            }
+            * { box-sizing: border-box; }
+            html, body { margin: 0; background: #0c0d12; color: var(--text); }
+            body { font-family: -apple-system, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+            .num { font-variant-numeric: tabular-nums; }
+            .stage { position: relative; min-height: 100vh; display: grid; grid-template-columns: 340px 1fr 340px; grid-template-rows: auto 1fr auto;
+                     gap: 16px; padding: max(20px, env(safe-area-inset-top)) 28px 22px; }
+            .scene { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
+            .shade { position: absolute; inset: 0; z-index: 0; pointer-events: none;
+                     background: radial-gradient(ellipse at center, rgba(0,0,0,0) 45%, rgba(0,0,0,.55) 100%), linear-gradient(180deg, rgba(0,0,0,.35), rgba(0,0,0,0) 22%, rgba(0,0,0,0) 70%, rgba(0,0,0,.55)); }
+            .stage > *:not(.scene):not(.shade) { position: relative; z-index: 1; }
+            .glass { background: var(--glass); border: 1px solid var(--glass-line); border-radius: 24px;
+                     -webkit-backdrop-filter: blur(18px) saturate(140%); backdrop-filter: blur(18px) saturate(140%); box-shadow: 0 12px 40px rgba(0,0,0,.35); }
+            .topbar { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; }
+            .brand { display: flex; align-items: center; gap: 10px; font-size: 26px; font-weight: 800; font-style: italic; letter-spacing: -.5px; }
+            .brand svg { width: 34px; height: 34px; filter: drop-shadow(0 0 10px rgba(255,122,47,.55)); }
+            .divider { width: 1px; height: 22px; background: var(--glass-line); }
+            .timer { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--muted); }
+            .timer i { width: 9px; height: 9px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 10px var(--danger); }
+            .toggle { margin: 0 auto; display: flex; padding: 4px; border-radius: 999px; }
+            .toggle button { font: inherit; font-size: 14px; color: var(--muted); background: none; border: 0; padding: 9px 20px; border-radius: 999px; cursor: pointer; }
+            .toggle button.on { background: #fff; color: #111; font-weight: 600; }
+            .right-tools { display: flex; align-items: center; gap: 10px; }
+            .iconbtn { position: relative; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; }
+            .iconbtn svg { width: 19px; height: 19px; }
+            .badge { position: absolute; top: -3px; right: -3px; min-width: 18px; height: 18px; border-radius: 9px; background: var(--accent); color: #fff;
+                     font-size: 11px; font-weight: 700; display: grid; place-items: center; padding: 0 5px; }
+            .badge[hidden] { display: none; }
+            .live { display: flex; align-items: center; gap: 9px; height: 44px; padding: 0 18px; border-radius: 999px; background: #0d0e12; border: 1px solid var(--glass-line); font-weight: 600; font-size: 14px; }
+            .live i { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); }
+            .live.on i { background: var(--safe); box-shadow: 0 0 10px var(--safe); animation: blink 1.6s infinite; }
+            @keyframes blink { 50% { opacity: .35; } }
+            .rec { font-size: 13px; color: var(--muted); padding: 0 14px; height: 44px; display: flex; align-items: center; border-radius: 999px; }
+            .rec[hidden] { display: none; }
+            .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+            .panel { padding: 18px 20px; }
+            .ph { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 17px; font-weight: 600; }
+            .chip { font-size: 12px; font-weight: 600; color: var(--muted); background: rgba(255,255,255,.08); border-radius: 999px; padding: 4px 10px; }
+            .note { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); margin-top: 8px; }
+            .note svg { width: 16px; height: 16px; flex: none; }
+            .alert { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--glass-line); }
+            .alert:first-child { border-top: 0; padding-top: 2px; }
+            .avatar { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; flex: none; border: 2px solid; }
+            .avatar svg { width: 18px; height: 18px; }
+            .alert b { display: block; font-size: 15px; font-weight: 600; }
+            .alert span { font-size: 12px; color: var(--muted); }
+            .alert em { margin-left: auto; font-style: normal; font-size: 30px; font-weight: 300; color: var(--faint); padding-left: 12px; border-left: 1px solid var(--glass-line); }
+            .empty { color: var(--muted); font-size: 14px; padding: 6px 0 4px; }
+            .stat { display: flex; align-items: baseline; gap: 10px; padding: 12px 0; border-top: 1px solid var(--glass-line); }
+            .stat:first-of-type { border-top: 0; padding-top: 0; }
+            .stat b { font-size: 40px; font-weight: 400; letter-spacing: -1px; }
+            .stat span { color: var(--muted); font-size: 14px; }
+            .stat small { margin-left: auto; font-size: 13px; font-weight: 600; }
+            .center { display: flex; flex-direction: column; align-items: center; }
+            .status { display: flex; align-items: center; gap: 14px; padding: 12px 22px 12px 12px; border-radius: 999px; transition: box-shadow .4s, border-color .4s; }
+            .status .ic { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; transition: background .4s; }
+            .status .ic svg { width: 22px; height: 22px; }
+            .status h1 { margin: 0; font-size: 20px; font-weight: 700; }
+            .status p { margin: 1px 0 0; font-size: 13px; color: var(--muted); }
+            .status.safe .ic { background: rgba(61,220,151,.18); color: var(--safe); }
+            .status.warning { border-color: rgba(255,179,71,.6); } .status.warning .ic { background: rgba(255,179,71,.2); color: var(--warn); }
+            .status.danger { border-color: rgba(255,77,77,.75); animation: alarm 1s infinite alternate; } .status.danger .ic { background: rgba(255,77,77,.25); color: var(--danger); }
+            .status.idle .ic { background: rgba(255,255,255,.08); color: var(--muted); }
+            @keyframes alarm { to { box-shadow: 0 0 34px rgba(255,77,77,.55); } }
+            .sensor { margin-top: 16px; width: min(420px, 100%); padding: 16px 20px; }
+            .sensor[hidden] { display: none; }
+            .summary { margin-top: 16px; width: min(640px, 100%); padding: 18px 22px; }
+            .summary[hidden] { display: none; }
+            .smtop { display: flex; gap: 24px; align-items: center; }
+            .ring { width: 140px; height: 140px; flex: none; }
+            #smRing { transition: stroke-dashoffset .8s cubic-bezier(.2,.8,.2,1), stroke .4s; }
+            .smstats { flex: 1; min-width: 0; }
+            .grade { font-size: 22px; font-weight: 700; margin: 0 0 6px; }
+            .kv { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; padding: 5px 0; color: var(--muted); border-top: 1px solid var(--glass-line); }
+            .kv:first-of-type { border-top: 0; }
+            .kv b { color: var(--text); font-weight: 600; }
+            .smcols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 16px; }
+            .sub2 { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin: 0 0 8px; }
+            .cnt { display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 4px 10px; font-size: 14px; padding: 6px 0; }
+            .cnt i { width: 9px; height: 9px; border-radius: 50%; }
+            .cnt .bar { grid-column: 2 / 4; height: 6px; background: rgba(255,255,255,.08); border-radius: 3px; overflow: hidden; }
+            .cnt .bar div { height: 100%; border-radius: 3px; }
+            .cnt small { color: var(--muted); }
+            .smnote { font-size: 12px; color: var(--faint); margin: 14px 0 0; }
+            @media (max-width: 700px) { .smtop { flex-direction: column; } .smcols { grid-template-columns: 1fr; } }
+            .srow { display: flex; justify-content: space-between; font-size: 14px; padding: 8px 0; border-top: 1px solid var(--glass-line); }
+            .srow:first-of-type { border-top: 0; }
+            .srow span:first-child { color: var(--muted); }
+            .ok { color: var(--safe); } .bad { color: var(--danger); }
+            .analytics { grid-column: 1 / 3; padding: 16px 22px 12px; }
+            .ahead { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+            .ahead h2 { margin: 0; font-size: 18px; font-weight: 600; }
+            .facts { display: flex; gap: 18px; font-size: 14px; color: var(--muted); flex-wrap: wrap; }
+            .facts b { color: var(--text); font-weight: 600; }
+            .bars { width: 100%; height: 118px; display: block; margin-top: 6px; }
+            .axis { display: flex; justify-content: space-between; font-size: 12px; color: var(--faint); margin-top: 6px; }
+            .dialwrap { grid-column: 3; align-self: end; justify-self: end; width: 214px; height: 214px; border-radius: 50%; padding: 8px; }
+            .dial { width: 100%; height: 100%; }
+            .dial .arc { transition: stroke-dashoffset .7s cubic-bezier(.2,.8,.2,1); }
+            .arcs path { fill: none; stroke: rgba(255,255,255,.45); stroke-width: 4; transition: stroke .4s, stroke-width .4s; }
+            .arcs path.caution { stroke: var(--warn); stroke-width: 7; filter: url(#glow); }
+            .arcs path.danger { stroke: var(--danger); stroke-width: 8; filter: url(#glow); animation: blink .8s infinite; }
+            .tags text { font-size: 26px; fill: rgba(255,255,255,.78); }
+            .tags tspan.v { fill: #fff; font-weight: 700; }
+            .tags .x { display: none; }
+            .tags line { stroke: rgba(255,255,255,.55); stroke-width: 2.5; stroke-dasharray: 5 8; }
+            .tail { animation: tail 2.4s ease-in-out infinite; }
+            @keyframes tail { 50% { opacity: .65; } }
+            @media (max-width: 1100px) {
+                .stage { grid-template-columns: 1fr; grid-template-rows: none; padding: max(14px, env(safe-area-inset-top)) 14px 22px; gap: 14px; }
+                .scene, .shade { height: 74vh; }
+                .topbar { flex-wrap: wrap; gap: 10px; }
+                .brand { font-size: 22px; }
+                .toggle { order: 5; margin: 0; width: 100%; justify-content: center; }
+                .right-tools { margin-left: auto; }
+                .timer, .divider { display: none; }
+                .center { grid-row: 2; min-height: 54vh; }
+                .col, .analytics, .dialwrap { grid-column: 1; }
+                .left { grid-row: 3; } .right { grid-row: 4; } .analytics { grid-row: 5; } .dialwrap { grid-row: 6; justify-self: center; }
+                .status { padding-right: 16px; }
+                .status h1 { font-size: 17px; }
+                .tags { display: none; }
+                .center { justify-content: flex-end; gap: 12px; }
+                .center .quick { display: grid; }
+                .center .lanebox { display: none; }
+            }
+            .quick { display: none; grid-template-columns: repeat(5, 1fr); width: 100%; padding: 12px 6px; text-align: center; border-radius: 20px; }
+            .quick span { display: block; font-size: 11px; color: var(--muted); }
+            .quick b { font-size: 15px; }
+            .lanebox { margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 10px 20px; border-radius: 999px; font-size: 15px; color: var(--muted); }
+            .lanebox[hidden] { display: none; }
+            .lanebox i { width: 10px; height: 10px; border-radius: 50%; background: var(--faint); }
+            .lanebox b { color: var(--text); font-weight: 700; }
+            .lanebox.ok i { background: var(--safe); box-shadow: 0 0 10px var(--safe); } .lanebox.ok b { color: var(--safe); }
+            .lanebox.tight { border-color: rgba(255,77,77,.7); } .lanebox.tight i { background: var(--danger); box-shadow: 0 0 10px var(--danger); } .lanebox.tight b { color: var(--danger); }
+        </style>
+    </head>
+    <body>
+        <main class="stage">
+            <svg class="scene" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                <defs>
+                    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity=".6"/><stop offset=".28" stop-color="#000" stop-opacity=".22"/><stop offset=".68" stop-color="#000" stop-opacity=".18"/><stop offset="1" stop-color="#000" stop-opacity=".75"/></linearGradient>
+                </defs>
+                <image href="{{ url_for('static', filename='rider.jpg') }}" x="0" y="-60" width="1600" height="1205" preserveAspectRatio="xMidYMid slice"/>
+                <rect width="1600" height="900" fill="url(#fade)"/>
+                <g transform="translate(798 520) scale(.78) translate(-800 -620)">
+                <g class="arcs">
+                    <path id="arcF1" d="M721 338 A230 300 0 0 1 879 338"/>
+                    <path id="arcF2" d="M697 282 A300 360 0 0 1 903 282"/>
+                    <path id="arcL1" d="M612 448 A230 300 0 0 0 612 792"/>
+                    <path id="arcL2" d="M554 413 A300 360 0 0 0 554 827"/>
+                    <path id="arcR1" d="M988 448 A230 300 0 0 1 988 792"/>
+                    <path id="arcR2" d="M1046 413 A300 360 0 0 1 1046 827"/>
+                </g>
+                <g class="tags">
+                    <text x="800" y="228" text-anchor="middle">Ahead: <tspan class="v" id="tAhead">–</tspan></text><line x1="725" y1="240" x2="875" y2="240"/>
+                    <text x="556" y="380" text-anchor="end">Left: <tspan class="v" id="tLeft">–</tspan></text><line x1="436" y1="392" x2="556" y2="392"/>
+                    <text x="1044" y="380">Right: <tspan class="v" id="tRight">–</tspan></text><line x1="1044" y1="392" x2="1164" y2="392"/>
+                    <text class="x" x="480" y="640" text-anchor="end">Riding: <tspan class="v" id="tRiding">–</tspan></text><line class="x" x1="310" y1="652" x2="480" y2="652"/>
+                    <text class="x" x="1120" y="640">Speed: <tspan class="v" id="tSpeed">–</tspan></text><line class="x" x1="1120" y1="652" x2="1290" y2="652"/>
+                </g>
+                </g>
+            </svg>
+            <div class="shade"></div>
+
+            <header class="topbar">
+                <div class="brand">
+                    <svg viewBox="0 0 32 32"><path d="M16 2l11 4.2v8.4c0 7-4.7 12.8-11 15.4C9.7 27.4 5 21.6 5 14.6V6.2z" fill="#ff7a2f"/><path d="M17.5 7L11 17h5l-1.5 8L21 15h-5z" fill="#1a0f08"/></svg>
+                    RiderGuard
+                </div>
+                <div class="divider"></div>
+                <div class="timer num"><i></i><span id="timer">00:00:00</span></div>
+                <div class="toggle glass" id="toggle"><button class="on" data-v="ride">Ride view</button><button data-v="sensor">Sensor view</button><button data-v="summary">Ride summary</button></div>
+                <div class="right-tools">
+                    <span class="rec glass" id="rec" hidden></span>
+                    <div class="iconbtn glass"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span class="badge num" id="bell" hidden>0</span></div>
+                    <div class="live" id="live"><i></i><span id="liveText">Connecting</span></div>
+                </div>
+            </header>
+
+            <aside class="col left">
+                <section class="glass panel">
+                    <div class="ph"><span>Riding behaviour</span><span class="chip">From glove motion</span></div>
+                    <svg viewBox="0 0 300 130" width="100%" style="display:block">
+                        <defs>
+                            <linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff7a2f" stop-opacity=".75"/><stop offset="1" stop-color="#ff7a2f" stop-opacity="0"/></linearGradient>
+                            <filter id="glow2" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                        </defs>
+                        <g stroke="rgba(255,255,255,.08)"><line x1="0" y1="35" x2="300" y2="35"/><line x1="0" y1="70" x2="300" y2="70"/><line x1="0" y1="105" x2="300" y2="105"/></g>
+                        <path id="mArea" fill="url(#area)"/>
+                        <path id="mLine" fill="none" stroke="#ff9a52" stroke-width="2.5" stroke-linejoin="round" filter="url(#glow2)"/>
+                        <line id="mCursor" y1="20" y2="112" stroke="#fff" stroke-opacity=".7" stroke-width="1.5" opacity="0"/>
+                        <circle id="mDot" r="5" fill="#ff7a2f" stroke="#fff" stroke-width="2" opacity="0"/>
+                        <g id="mBadge" opacity="0"><rect x="-38" y="-30" width="76" height="22" rx="7" fill="#fff"/><text id="mBadgeText" y="-14" text-anchor="middle" font-size="11" font-weight="700" fill="#111"></text></g>
+                        <g fill="rgba(255,255,255,.45)" font-size="10"><text x="0" y="128">−30s</text><text x="96" y="128">−20s</text><text x="196" y="128">−10s</text><text x="300" y="128" text-anchor="end">now</text></g>
+                    </svg>
+                    <div class="note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 11v6M12 7.5v.5" stroke-linecap="round"/></svg><span id="ridingNote">Waiting for riding predictions</span></div>
+                </section>
+                <section class="glass panel" style="flex:1">
+                    <div class="ph"><span>Recent alerts <span class="chip num" id="alertCount">0</span></span></div>
+                    <div id="alerts"><p class="empty">No alerts this ride</p></div>
+                </section>
+            </aside>
+
+            <div class="center">
+                <div class="status glass idle" id="status"><div class="ic" id="statusIc"></div><div><h1 id="statusTitle">Connecting</h1><p id="statusDetail">Starting up</p></div></div>
+                <div class="quick glass num"><div><span>Ahead</span><b id="qAhead">–</b></div><div><span>Left</span><b id="qLeft">–</b></div><div><span>Right</span><b id="qRight">–</b></div><div><span>Riding</span><b id="qRiding">–</b></div><div><span>Lane</span><b id="qLane">–</b></div></div>
+                <section class="glass sensor" id="sensor" hidden><div class="ph"><span>Sensor details</span><span class="chip">For the team</span></div><div id="sensorRows"></div></section>
+                <section class="glass summary" id="summary" hidden>
+                    <div class="ph"><span>Ride summary</span><span class="chip">This ride</span></div>
+                    <div class="smtop">
+                        <svg class="ring" viewBox="0 0 140 140">
+                            <circle cx="70" cy="70" r="58" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="12"/>
+                            <circle id="smRing" cx="70" cy="70" r="58" fill="none" stroke="#3ddc97" stroke-width="12" stroke-linecap="round" stroke-dasharray="364.4" stroke-dashoffset="364.4" transform="rotate(-90 70 70)"/>
+                            <text id="smScore" class="num" x="70" y="78" text-anchor="middle" font-size="42" font-weight="700" fill="#fff">–</text>
+                            <text x="70" y="100" text-anchor="middle" font-size="11" fill="rgba(255,255,255,.6)">Riding score</text>
+                        </svg>
+                        <div class="smstats num">
+                            <p class="grade" id="smGrade">Loading</p>
+                            <div class="kv"><span>Ride time</span><b id="smTime">–</b></div>
+                            <div class="kv"><span>Distance</span><b id="smDist">–</b></div>
+                            <div class="kv"><span>Top / average speed</span><b id="smSpeed">–</b></div>
+                            <div class="kv"><span>Safe riding (predicted)</span><b id="smSmooth">–</b></div>
+                        </div>
+                    </div>
+                    <div class="smcols">
+                        <div><p class="sub2">Alerts by type</p><div id="smCounts"></div></div>
+                        <div><p class="sub2">Where alerts happened</p>
+                            <svg id="smMap" viewBox="0 0 300 170" width="100%" style="display:block;border-radius:14px;background:rgba(0,0,0,.25)">
+                                <polyline id="smLine" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+                                <g id="smSpots"></g>
+                                <text id="smWait" x="150" y="90" text-anchor="middle" font-size="13" fill="rgba(255,255,255,.55)">Waiting for GPS fix</text>
+                            </svg>
+                        </div>
+                    </div>
+                    <p class="smnote" id="smNote"></p>
+                </section>
+                <div class="lanebox glass" id="laneBox"><i></i><span>Lane split</span><b id="laneVerdict">No reading</b></div>
+            </div>
+
+            <aside class="col right">
+                <section class="glass panel">
+                    <div class="ph"><span>Route</span><span class="chip num" id="routeDist">0.00 km</span></div>
+                    <svg viewBox="0 0 300 210" width="100%" style="display:block;border-radius:16px;background:rgba(0,0,0,.25)">
+                        <g fill="none" stroke="rgba(255,255,255,.07)" stroke-width="1.2">
+                            <path d="M-10 40 C60 20 110 70 170 50 S260 10 320 40"/><path d="M-10 80 C50 60 120 110 180 90 S270 50 320 85"/>
+                            <path d="M-10 125 C70 100 120 150 190 130 S260 100 320 130"/><path d="M-10 170 C60 150 130 195 200 172 S270 150 320 178"/>
+                            <path d="M40 -10 C70 60 30 120 70 220"/><path d="M230 -10 C200 70 260 130 220 220"/>
+                        </g>
+                        <polyline id="routeLine" fill="none" stroke="#ff7a2f" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" filter="url(#glow2)"/>
+                        <circle id="routeStart" r="6" fill="#fff" opacity="0"/>
+                        <text id="routeStartText" font-size="12" fill="#fff" opacity="0">Start</text>
+                        <circle id="routeNow" r="8" fill="#ff7a2f" stroke="#fff" stroke-width="2.5" opacity="0"/>
+                        <text id="routeWait" x="150" y="110" text-anchor="middle" font-size="13" fill="rgba(255,255,255,.55)">Waiting for GPS fix</text>
+                    </svg>
+                </section>
+                <section class="glass panel">
+                    <div class="stat"><b class="num" id="sTop">–</b><span>Top speed</span><small class="num" style="color:var(--muted)">km/h</small></div>
+                    <div class="stat"><b class="num" id="sAlerts">0</b><span>Alerts</span><small id="sAlertsTag" class="ok">Calm ride</small></div>
+                    <div class="stat"><b class="num" id="sResp">–</b><span>Response</span><small id="sRespTag" style="color:var(--muted)">ms</small></div>
+                </section>
+            </aside>
+
+            <section class="glass analytics">
+                <div class="ahead"><h2>Ride analytics</h2>
+                    <div class="facts num"><span>Distance: <b id="fDist">0.00 km</b></span><span>Ride time: <b id="fTime">0:00</b></span><span>Altitude: <b id="fAlt">–</b></span></div>
+                </div>
+                <svg class="bars" id="bars" viewBox="0 0 1000 130" preserveAspectRatio="none">
+                    <defs><linearGradient id="bar" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff8a3d"/><stop offset="1" stop-color="#ff7a2f" stop-opacity=".08"/></linearGradient>
+                          <linearGradient id="barNow" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe2b8"/><stop offset="1" stop-color="#ffb15c" stop-opacity=".2"/></linearGradient></defs>
+                    <g id="barG"></g>
+                </svg>
+                <div class="axis num"><span>−2 min</span><span>−90 s</span><span>−1 min</span><span>−30 s</span><span>now</span></div>
+            </section>
+
+            <div class="dialwrap glass">
+                <svg class="dial" viewBox="0 0 240 240">
+                    <circle cx="120" cy="120" r="104" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="2"/>
+                    <circle cx="120" cy="120" r="88" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="10"/>
+                    <circle class="arc" id="dArc" cx="120" cy="120" r="88" fill="none" stroke="#ff7a2f" stroke-width="10" stroke-linecap="round"
+                            stroke-dasharray="552.9" stroke-dashoffset="552.9" transform="rotate(-90 120 120)" filter="url(#glow2)"/>
+                    <g fill="#fff" font-size="15" font-weight="600" text-anchor="middle"><text x="120" y="30">N</text><text x="216" y="125">E</text><text x="120" y="222">S</text><text x="24" y="125">W</text></g>
+                    <g id="dHead" opacity="0"><circle cx="120" cy="16" r="6" fill="#ff7a2f" stroke="#fff" stroke-width="2"/></g>
+                    <circle cx="120" cy="120" r="58" fill="#fff"/>
+                    <text id="dSpeed" class="num" x="120" y="124" text-anchor="middle" font-size="34" font-weight="700" fill="#111">–</text>
+                    <text x="120" y="146" text-anchor="middle" font-size="13" fill="#555">km/h</text>
+                </svg>
+            </div>
+        </main>
+
+        <script>
+            const ICONS = {
+                safe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M8.5 12.5l2.4 2.4 4.6-5"/></svg>',
+                warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9.5 17h-19z"/><path d="M12 10v4M12 17.5v.5"/></svg>',
+                danger: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16.5v.5"/></svg>',
+                idle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M12 19.5h.01M2 9a15 15 0 0 1 20 0"/></svg>'
+            };
+            const KIND = {
+                riding: { color: "var(--warn)", icon: '<path d="M4 18c4-1 6-5 8-9s5-5 8-5"/><path d="M16 4h4v4"/>' },
+                object: { color: "var(--danger)", icon: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4M12 15.5v.5"/>' },
+                lane: { color: "var(--accent)", icon: '<path d="M7 3v18M17 3v18M12 6v3M12 12v3M12 18v2"/>' },
+                speed: { color: "#c084fc", icon: '<path d="M4 16a8 8 0 0 1 16 0"/><path d="M12 16l4-5"/>' },
+                follow: { color: "var(--danger)", icon: '<rect x="4" y="13" width="6" height="6" rx="1.5"/><rect x="14" y="5" width="6" height="6" rx="1.5"/><path d="M9 11l4-4M13 7h-3M13 7v3"/>' }
+            };
+            const SHORT = { safe: "Safe", unsafe_following_distance: "Too close" };
+            let view = "ride";
+            const $ = id => document.getElementById(id);
+            const fmt = (v, d = 0) => v === null || v === undefined ? "–" : Number(v).toFixed(d);
+            const clock = s => [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60].map(n => String(n).padStart(2, "0")).join(":");
+
+            function level(value, danger, caution) {
+                if (value === null || value === undefined) return "";
+                return value < danger ? "danger" : value < caution ? "caution" : "";
+            }
+
+            function setArcs(ids, cls) { for (const id of ids) $(id).setAttribute("class", cls); }
+
+            function setStatus(lvl, title, detail) {
+                $("status").className = "status glass " + lvl;
+                if ($("status").dataset.l !== lvl) { $("statusIc").innerHTML = ICONS[lvl]; $("status").dataset.l = lvl; }
+                $("statusTitle").textContent = title;
+                $("statusDetail").textContent = detail;
+            }
+
+            function setLive(on, text) { $("live").classList.toggle("on", on); $("liveText").textContent = text; }
+
+            function drawMotion(s) {
+                const pts = [...s.gloves.left.motion, ...s.gloves.right.motion].sort((a, b) => a[0] - b[0]);
+                if (pts.length < 2) { $("mArea").setAttribute("d", ""); $("mLine").setAttribute("d", ""); for (const id of ["mDot", "mBadge", "mCursor"]) $(id).setAttribute("opacity", 0); return; }
+                const top = Math.max(80, ...pts.map(p => p[1]));
+                const xy = pts.map(([t, g]) => [(t + 30) / 30 * 300, 112 - g / top * 80]);
+                let d = `M${xy[0][0].toFixed(1)} ${xy[0][1].toFixed(1)}`;
+                for (let i = 1; i < xy.length; i++) {
+                    const [x0, y0] = xy[i - 1], [x1, y1] = xy[i], mx = (x0 + x1) / 2;
+                    d += ` C${mx.toFixed(1)} ${y0.toFixed(1)} ${mx.toFixed(1)} ${y1.toFixed(1)} ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+                }
+                const [lx, ly] = xy[xy.length - 1];
+                $("mLine").setAttribute("d", d);
+                $("mArea").setAttribute("d", `${d} L${lx.toFixed(1)} 112 L${xy[0][0].toFixed(1)} 112 Z`);
+                $("mDot").setAttribute("cx", lx); $("mDot").setAttribute("cy", ly); $("mDot").setAttribute("opacity", 1);
+                $("mCursor").setAttribute("x1", lx); $("mCursor").setAttribute("x2", lx); $("mCursor").setAttribute("opacity", 1);
+                const label = s.riding ? (SHORT[s.riding.key] || s.riding.name) : "";
+                $("mBadge").setAttribute("opacity", label ? 1 : 0);
+                $("mBadge").setAttribute("transform", `translate(${Math.min(Math.max(lx, 40), 260)} ${Math.max(ly, 34)})`);
+                $("mBadgeText").textContent = label;
+            }
+
+            function drawRoute(track) {
+                const ok = track.length >= 2;
+                for (const id of ["routeStart", "routeStartText", "routeNow"]) $(id).setAttribute("opacity", ok ? 1 : 0);
+                $("routeWait").setAttribute("opacity", ok ? 0 : 1);
+                if (!ok) { $("routeLine").setAttribute("points", ""); return; }
+                const lats = track.map(p => p[0]), lons = track.map(p => p[1]);
+                const [a, b, c, d] = [Math.min(...lats), Math.max(...lats), Math.min(...lons), Math.max(...lons)];
+                const span = Math.max(b - a, (d - c) * Math.cos(a * Math.PI / 180), 1e-5);
+                const sx = 250 / span;
+                const xy = track.map(([la, lo]) => [150 + ((lo - (c + d) / 2) * Math.cos(a * Math.PI / 180)) * sx * .9, 105 - (la - (a + b) / 2) * sx * .7]);
+                $("routeLine").setAttribute("points", xy.map(p => p.map(v => v.toFixed(1)).join(",")).join(" "));
+                const [x0, y0] = xy[0], [x1, y1] = xy[xy.length - 1];
+                $("routeStart").setAttribute("cx", x0); $("routeStart").setAttribute("cy", y0);
+                $("routeStartText").setAttribute("x", x0 + 10); $("routeStartText").setAttribute("y", y0 + 4);
+                $("routeNow").setAttribute("cx", x1); $("routeNow").setAttribute("cy", y1);
+            }
+
+            function drawBars(speeds, top) {
+                const bins = new Array(60).fill(null);
+                for (const [t, v] of speeds) { const i = Math.floor((t + 120) / 2); if (i >= 0 && i < 60) bins[i] = Math.max(bins[i] ?? 0, v); }
+                const max = Math.max(top || 0, 20);
+                let html = "";
+                bins.forEach((v, i) => {
+                    const h = v === null ? 4 : Math.max(6, v / max * 120);
+                    html += `<rect x="${i * 16.6 + 2}" y="${128 - h}" width="12" height="${h}" rx="4" fill="url(#${i === 59 ? "barNow" : "bar"})" opacity="${v === null ? .25 : 1}"/>`;
+                });
+                $("barG").innerHTML = html;
+            }
+
+            function render(s) {
+                const anyOn = s.nodes.some(n => n.online), helmetOn = s.nodes[0].online;
+                setLive(anyOn, anyOn ? "Live" : "Waiting");
+                setStatus(s.status.level, s.status.title, s.status.detail);
+                $("timer").textContent = clock(s.ride_s);
+                $("rec").hidden = !s.recording;
+                $("rec").textContent = s.recording ? `Recording data · ${s.recording.replace(/_/g, " ")}` : "";
+                $("bell").hidden = !s.alert_count; $("bell").textContent = s.alert_count;
+
+                const th = s.thresholds, n = s.nearest;
+                const front = n && n.in_front ? n.m : null;
+                setArcs(["arcF1", "arcF2"], level(front, th.warn_m, th.warn_m * 2));
+                const left = s.lane.left ?? s.gloves.left.gap_cm, right = s.lane.right ?? s.gloves.right.gap_cm;
+                setArcs(["arcL1", "arcL2"], level(left, th.side_danger, th.side_caution));
+                setArcs(["arcR1", "arcR2"], level(right, th.side_danger, th.side_caution));
+                $("tAhead").textContent = !helmetOn ? "–" : front !== null ? `${fmt(front, 1)} m` : "Clear";
+                $("tLeft").textContent = left === null ? "–" : `${fmt(left)} cm`;
+                $("tRight").textContent = right === null ? "–" : `${fmt(right)} cm`;
+                $("tSpeed").textContent = s.speed === null ? "–" : `${s.speed} km/h`;
+                $("tRiding").textContent = s.riding ? (SHORT[s.riding.key] || s.riding.name) : "–";
+                for (const k of ["Ahead", "Left", "Right", "Riding"]) $("q" + k).textContent = $("t" + k).textContent;
+                const lv = s.lane.verdict;
+                $("laneBox").className = "lanebox glass " + (lv || "");
+                $("laneVerdict").textContent = lv === "ok" ? "OK to split" : lv === "tight" ? "Too tight" : "No reading";
+                $("qLane").textContent = lv === "ok" ? "OK" : lv === "tight" ? "Too tight" : "–";
+
+                drawMotion(s);
+                $("ridingNote").textContent = !s.riding ? "Waiting for riding predictions" : s.riding.level === "safe" ? "Safe riding" : `${s.riding.name} detected`;
+
+                $("alertCount").textContent = s.alert_count;
+                $("alerts").innerHTML = s.events.length ? "" : '<p class="empty">No alerts this ride</p>';
+                s.events.slice(0, 4).forEach((e, i) => {
+                    const k = KIND[e.kind], row = document.createElement("div");
+                    row.className = "alert";
+                    row.innerHTML = `<div class="avatar" style="border-color:${k.color};color:${k.color}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">${k.icon}</svg></div><div><b></b><span class="num"></span></div><em class="num">${i + 1}</em>`;
+                    row.querySelector("b").textContent = e.text;
+                    row.querySelector("span").textContent = e.dur >= 1 ? `${e.time} · lasted ${Math.round(e.dur)} s` : e.time;
+                    $("alerts").appendChild(row);
+                });
+
+                drawRoute(s.ride.track);
+                $("routeDist").textContent = `${s.ride.distance_km.toFixed(2)} km`;
+                $("sTop").textContent = s.ride.top_speed === null ? "–" : Math.round(s.ride.top_speed);
+                $("sAlerts").textContent = s.alert_count;
+                $("sAlertsTag").textContent = s.alert_count ? "Stay alert" : "Calm ride";
+                $("sAlertsTag").className = s.alert_count ? "bad" : "ok";
+                const r = s.latency.last;
+                $("sResp").textContent = fmt(r);
+                $("sRespTag").textContent = r === null ? "ms" : r <= s.latency.target ? "Fast" : "Slow";
+                $("sRespTag").className = r === null ? "" : r <= s.latency.target ? "ok" : "bad";
+
+                drawBars(s.ride.speeds, s.ride.top_speed);
+                $("fDist").textContent = `${s.ride.distance_km.toFixed(2)} km`;
+                $("fTime").textContent = clock(s.ride_s);
+                $("fAlt").textContent = s.ride.altitude === null ? "–" : `${s.ride.altitude} m`;
+
+                $("dSpeed").textContent = fmt(s.speed);
+                $("dArc").setAttribute("stroke-dashoffset", (552.9 * (1 - s.speed_pct)).toFixed(1));
+                $("dArc").style.stroke = s.speeding ? "var(--danger)" : "";
+                $("dHead").setAttribute("opacity", s.ride.heading === null ? 0 : 1);
+                $("dHead").setAttribute("transform", `rotate(${s.ride.heading ?? 0} 120 120)`);
+
+                const rows = [
+                    ...s.nodes.map(d => [d.name, d.online ? `Online · ${d.age}s` : d.age === null ? "Not seen" : `Offline · ${Math.round(d.age)}s`, d.online ? "ok" : "bad"]),
+                    ["LiDAR", s.lidar_status || "–", ""],
+                    ["Nearest object", n ? `${fmt(n.m, 2)} m at ${fmt(n.angle)}°` : "–", ""],
+                    ["Lane split", s.lane.verdict === "ok" ? "OK to split" : s.lane.verdict === "tight" ? "Too tight" : "No reading", s.lane.verdict === "tight" ? "bad" : s.lane.verdict === "ok" ? "ok" : ""],
+                    ["Speed limit", `${s.thresholds.speed_limit} km/h`, s.speeding ? "bad" : ""],
+                    ["Following gap", s.follow_gap_s === null ? `OK (keep ${s.thresholds.follow_s} s)` : `${s.follow_gap_s} s · too close`, s.follow_gap_s === null ? "" : "bad"],
+                    ["LiDAR front angle", `${s.thresholds.front_deg}°`, ""],
+                    ["GPS", s.location ? `${s.location.fix ? "Fix" : "No fix"} · ${s.location.satellites ?? 0} sats` : "No fix", ""],
+                    ["Response time", s.latency.last === null ? "–" : `${s.latency.last} ms (avg ${s.latency.avg}, max ${s.latency.max})`, ""],
+                    ...Object.entries(s.predictions).map(([k, v]) => [`${k[0].toUpperCase()}${k.slice(1)} prediction`, v, ""])
+                ];
+                $("sensorRows").innerHTML = "";
+                for (const [k, v, c] of rows) {
+                    const row = document.createElement("div");
+                    row.className = "srow";
+                    row.innerHTML = "<span></span><span></span>";
+                    row.children[0].textContent = k; row.children[1].textContent = v; row.children[1].className = c;
+                    $("sensorRows").appendChild(row);
+                }
+            }
+
+            async function tick() {
+                try {
+                    const res = await fetch("/api/state", { cache: "no-store" });
+                    const body = await res.json();
+                    if (res.ok) render(body);
+                    else { setLive(false, "Database offline"); setStatus("idle", "Database not running", "Start MongoDB and this page reconnects by itself"); }
+                } catch (e) {
+                    setLive(false, "Offline");
+                    setStatus("idle", "Dashboard server not reachable", "Check that rider_dashboard.py is running");
+                }
+                setTimeout(tick, 700);
+            }
+
+            let summaryTimer = null;
+            const KIND_OF = { "Near object": "object", "Unsafe lane splitting": "lane", "Speeding": "speed",
+                              "Unsafe following distance": "follow" };
+
+            function project(track, w, h, pad) {
+                const lats = track.map(p => p[0]), lons = track.map(p => p[1]);
+                const [a, b, c, d] = [Math.min(...lats), Math.max(...lats), Math.min(...lons), Math.max(...lons)];
+                const k = Math.cos(a * Math.PI / 180), span = Math.max(b - a, (d - c) * k, 1e-5);
+                const sc = Math.min(w - 2 * pad, h - 2 * pad) / span;
+                return ([la, lo]) => [w / 2 + (lo - (c + d) / 2) * k * sc, h / 2 - (la - (a + b) / 2) * sc];
+            }
+
+            function renderSummary(m) {
+                const color = m.score >= 85 ? "var(--safe)" : m.score >= 65 ? "var(--warn)" : "var(--danger)";
+                $("smRing").setAttribute("stroke-dashoffset", (364.4 * (1 - m.score / 100)).toFixed(1));
+                $("smRing").style.stroke = color;
+                $("smScore").textContent = m.score;
+                $("smGrade").textContent = m.grade;
+                $("smGrade").style.color = color;
+                $("smTime").textContent = clock(m.duration_s);
+                $("smDist").textContent = `${m.distance_km.toFixed(2)} km`;
+                $("smSpeed").textContent = m.top_speed === null ? "–" : `${Math.round(m.top_speed)} / ${Math.round(m.avg_speed)} km/h`;
+                $("smSmooth").textContent = m.smooth_pct === null ? "–" : `${m.smooth_pct}%`;
+                const max = Math.max(1, ...m.counts.map(c => c.count));
+                $("smCounts").innerHTML = m.counts.length ? "" : '<p class="empty">No alerts. Clean ride!</p>';
+                for (const c of m.counts) {
+                    const col = KIND[KIND_OF[c.title] || "riding"].color, row = document.createElement("div");
+                    row.className = "cnt num";
+                    row.innerHTML = `<i style="background:${col}"></i><span></span><b></b><div class="bar"><div style="width:${c.count / max * 100}%;background:${col}"></div></div>`;
+                    row.children[1].textContent = c.title;
+                    row.children[2].textContent = c.count;
+                    $("smCounts").appendChild(row);
+                }
+                const ok = m.track.length >= 2;
+                $("smWait").setAttribute("opacity", ok ? 0 : 1);
+                $("smLine").setAttribute("points", "");
+                $("smSpots").innerHTML = "";
+                if (ok) {
+                    const to = project(m.track, 300, 170, 16);
+                    $("smLine").setAttribute("points", m.track.map(p => to(p).map(v => v.toFixed(1)).join(",")).join(" "));
+                    for (const sp of m.spots) {
+                        const [x, y] = to(sp.point);
+                        $("smSpots").insertAdjacentHTML("beforeend", `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="6" fill="${KIND[sp.kind].color}" stroke="#fff" stroke-width="1.5" opacity=".9"/>`);
+                    }
+                }
+                const pen = Object.entries(m.penalties).map(([k, v]) => `${k.toLowerCase()} −${v}`).join(", ");
+                $("smNote").textContent = `Score starts at 100 and loses points per alert, averaged per 10 minutes of riding: ${pen}.`;
+            }
+
+            async function loadSummary() {
+                try {
+                    const res = await fetch("/api/summary", { cache: "no-store" });
+                    if (res.ok) renderSummary(await res.json());
+                } catch (e) {}
+                if (view === "summary") summaryTimer = setTimeout(loadSummary, 2000);
+            }
+
+            $("toggle").addEventListener("click", e => {
+                if (!e.target.dataset.v) return;
+                view = e.target.dataset.v;
+                for (const b of $("toggle").children) b.classList.toggle("on", b === e.target);
+                $("sensor").hidden = view !== "sensor";
+                $("summary").hidden = view !== "summary";
+                for (const g of document.querySelectorAll(".scene .tags, .scene .arcs")) g.style.display = view === "ride" ? "" : "none";
+                $("laneBox").hidden = view !== "ride";
+                clearTimeout(summaryTimer);
+                if (view === "summary") loadSummary();
+            });
+            drawBars([], 0);
+            tick();
+        </script>
+    </body>
+</html>
