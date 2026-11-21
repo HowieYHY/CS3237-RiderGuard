@@ -135,17 +135,29 @@
                 .tags { display: none; }
                 .center { justify-content: flex-end; gap: 12px; }
                 .center .quick { display: grid; }
-                .center .lanebox { display: none; }
             }
-            .quick { display: none; grid-template-columns: repeat(5, 1fr); width: 100%; padding: 12px 6px; text-align: center; border-radius: 20px; }
+            .quick { display: none; grid-template-columns: repeat(4, 1fr); width: 100%; padding: 12px 6px; text-align: center; border-radius: 20px; }
             .quick span { display: block; font-size: 11px; color: var(--muted); }
             .quick b { font-size: 15px; }
-            .lanebox { margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 10px 20px; border-radius: 999px; font-size: 15px; color: var(--muted); }
-            .lanebox[hidden] { display: none; }
-            .lanebox i { width: 10px; height: 10px; border-radius: 50%; background: var(--faint); }
-            .lanebox b { color: var(--text); font-weight: 700; }
-            .lanebox.ok i { background: var(--safe); box-shadow: 0 0 10px var(--safe); } .lanebox.ok b { color: var(--safe); }
-            .lanebox.tight { border-color: rgba(255,77,77,.7); } .lanebox.tight i { background: var(--danger); box-shadow: 0 0 10px var(--danger); } .lanebox.tight b { color: var(--danger); }
+            .overlay { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 16px; overflow-y: auto;
+                       background: rgba(8,9,13,.55); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+            .overlay[hidden] { display: none; }
+            .card { width: min(440px, 100%); padding: 26px 24px; text-align: center; }
+            .card h2 { margin: 0 0 6px; font-size: 24px; }
+            .card > p { margin: 0 0 18px; color: var(--muted); font-size: 14px; }
+            .btn { font: inherit; font-weight: 700; font-size: 17px; border: 0; border-radius: 999px; padding: 14px 28px; cursor: pointer;
+                   background: var(--accent); color: #fff; width: 100%; }
+            .btn.ghost { background: rgba(255,255,255,.1); color: var(--text); font-weight: 600; font-size: 15px; padding: 11px 20px; margin-top: 10px; }
+            .btn.small { width: auto; font-size: 14px; padding: 0 18px; height: 44px; }
+            .btn[hidden] { display: none; }
+            .check { text-align: left; margin: 0 0 18px; }
+            .wait { color: var(--warn); }
+            .trips { text-align: left; margin-top: 22px; }
+            .trip { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--glass-line); cursor: pointer; }
+            .trip b { display: block; font-size: 15px; font-weight: 600; }
+            .trip span { font-size: 12px; color: var(--muted); }
+            .trip em { font-style: normal; font-size: 22px; font-weight: 700; }
+            .timeline { margin-top: 16px; }
         </style>
     </head>
     <body>
@@ -187,6 +199,7 @@
                 <div class="toggle glass" id="toggle"><button class="on" data-v="ride">Ride view</button><button data-v="sensor">Sensor view</button><button data-v="summary">Ride summary</button></div>
                 <div class="right-tools">
                     <span class="rec glass" id="rec" hidden></span>
+                    <button class="btn small" id="endBtn" hidden>End trip</button>
                     <div class="iconbtn glass"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span class="badge num" id="bell" hidden>0</span></div>
                     <div class="live" id="live"><i></i><span id="liveText">Connecting</span></div>
                 </div>
@@ -218,10 +231,11 @@
 
             <div class="center">
                 <div class="status glass idle" id="status"><div class="ic" id="statusIc"></div><div><h1 id="statusTitle">Connecting</h1><p id="statusDetail">Starting up</p></div></div>
-                <div class="quick glass num"><div><span>Ahead</span><b id="qAhead">–</b></div><div><span>Left</span><b id="qLeft">–</b></div><div><span>Right</span><b id="qRight">–</b></div><div><span>Riding</span><b id="qRiding">–</b></div><div><span>Lane</span><b id="qLane">–</b></div></div>
+                <button class="btn small" id="newTripBtn" style="margin-top:12px" hidden>Start new trip</button>
+                <div class="quick glass num"><div><span>Ahead</span><b id="qAhead">–</b></div><div><span>Left</span><b id="qLeft">–</b></div><div><span>Right</span><b id="qRight">–</b></div><div><span>Riding</span><b id="qRiding">–</b></div></div>
                 <section class="glass sensor" id="sensor" hidden><div class="ph"><span>Sensor details</span><span class="chip">For the team</span></div><div id="sensorRows"></div></section>
                 <section class="glass summary" id="summary" hidden>
-                    <div class="ph"><span>Ride summary</span><span class="chip">This ride</span></div>
+                    <div class="ph"><span>Ride summary</span><span class="chip" id="smWhen">This ride</span></div>
                     <div class="smtop">
                         <svg class="ring" viewBox="0 0 140 140">
                             <circle cx="70" cy="70" r="58" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="12"/>
@@ -235,21 +249,22 @@
                             <div class="kv"><span>Distance</span><b id="smDist">–</b></div>
                             <div class="kv"><span>Top / average speed</span><b id="smSpeed">–</b></div>
                             <div class="kv"><span>Safe riding (predicted)</span><b id="smSmooth">–</b></div>
+                            <div class="kv"><span>Route ridden safely</span><b id="smSafeRoute">–</b></div>
                         </div>
                     </div>
                     <div class="smcols">
                         <div><p class="sub2">Alerts by type</p><div id="smCounts"></div></div>
-                        <div><p class="sub2">Where alerts happened</p>
+                        <div><p class="sub2">Route · green is safe riding</p>
                             <svg id="smMap" viewBox="0 0 300 170" width="100%" style="display:block;border-radius:14px;background:rgba(0,0,0,.25)">
-                                <polyline id="smLine" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+                                <g id="smSegs" fill="none" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"></g>
                                 <g id="smSpots"></g>
-                                <text id="smWait" x="150" y="90" text-anchor="middle" font-size="13" fill="rgba(255,255,255,.55)">Waiting for GPS fix</text>
+                                <text id="smWait" x="150" y="90" text-anchor="middle" font-size="13" fill="rgba(255,255,255,.55)">No GPS track for this trip</text>
                             </svg>
                         </div>
                     </div>
+                    <div class="timeline"><p class="sub2">Timeline</p><div id="smEvents"></div></div>
                     <p class="smnote" id="smNote"></p>
                 </section>
-                <div class="lanebox glass" id="laneBox"><i></i><span>Lane split</span><b id="laneVerdict">No reading</b></div>
             </div>
 
             <aside class="col right">
@@ -302,6 +317,24 @@
             </div>
         </main>
 
+        <div class="overlay" id="startScreen" hidden>
+            <section class="glass card">
+                <h2>Ready to ride?</h2>
+                <p>Turn on the helmet and both gloves, then start your trip.</p>
+                <button class="btn" id="startBtn">Start trip</button>
+                <div class="trips"><p class="sub2">Past trips</p><div id="tripList"><p class="empty">No trips yet</p></div></div>
+            </section>
+        </div>
+        <div class="overlay" id="waitScreen" hidden>
+            <section class="glass card">
+                <h2>Connecting</h2>
+                <p>Waiting for the helmet and both gloves to send data</p>
+                <div class="check" id="checkRows"></div>
+                <button class="btn" id="anywayBtn">Start anyway</button>
+                <button class="btn ghost" id="cancelBtn">Cancel trip</button>
+            </section>
+        </div>
+
         <script>
             const ICONS = {
                 safe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M8.5 12.5l2.4 2.4 4.6-5"/></svg>',
@@ -312,7 +345,6 @@
             const KIND = {
                 riding: { color: "var(--warn)", icon: '<path d="M4 18c4-1 6-5 8-9s5-5 8-5"/><path d="M16 4h4v4"/>' },
                 object: { color: "var(--danger)", icon: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4M12 15.5v.5"/>' },
-                lane: { color: "var(--accent)", icon: '<path d="M7 3v18M17 3v18M12 6v3M12 12v3M12 18v2"/>' },
                 speed: { color: "#c084fc", icon: '<path d="M4 16a8 8 0 0 1 16 0"/><path d="M12 16l4-5"/>' },
                 follow: { color: "var(--danger)", icon: '<rect x="4" y="13" width="6" height="6" rx="1.5"/><rect x="14" y="5" width="6" height="6" rx="1.5"/><path d="M9 11l4-4M13 7h-3M13 7v3"/>' }
             };
@@ -388,7 +420,39 @@
                 $("barG").innerHTML = html;
             }
 
+            function fillRows(el, rows) {
+                el.innerHTML = "";
+                for (const [k, v, c] of rows) {
+                    const row = document.createElement("div");
+                    row.className = "srow";
+                    row.innerHTML = "<span></span><span></span>";
+                    row.children[0].textContent = k; row.children[1].textContent = v; row.children[1].className = c;
+                    el.appendChild(row);
+                }
+            }
+
+            function renderTrip(s) {
+                const t = s.trip;
+                if (!t.active) unlocked = false;  // the rider leaves the Connecting screen by tapping its button
+                $("startScreen").hidden = t.active || view !== "ride";
+                $("newTripBtn").hidden = t.active || view === "ride";  // ride view has the start card instead
+                $("waitScreen").hidden = !t.active || unlocked;
+                $("endBtn").hidden = !t.active;
+                if ($("waitScreen").hidden) return;
+                const allOn = s.nodes.every(n => n.online);
+                $("anywayBtn").textContent = allOn ? "All connected · Start ride" : "Start anyway";
+                $("anywayBtn").style.background = allOn ? "var(--safe)" : "";
+                const fix = s.gps_fix;
+                fillRows($("checkRows"), [
+                    ["Server", s.broker ? "Connected" : "Starting…", s.broker ? "ok" : "wait"],
+                    ["Model", s.model ? "Loaded" : "Not loaded (no predictions)", s.model ? "ok" : "bad"],
+                    ...s.nodes.map(d => [d.name, d.online ? `Receiving · ${d.age}s ago` : d.age === null ? "Waiting…" : `Lost · ${Math.round(d.age)}s ago`, d.online ? "ok" : "wait"]),
+                    ["GPS", fix ? `Fix · ${s.satellites ?? 0} sats` : s.nodes[0].online ? "Searching…" : "Waiting for helmet", fix ? "ok" : "wait"]
+                ]);
+            }
+
             function render(s) {
+                renderTrip(s);
                 const anyOn = s.nodes.some(n => n.online), helmetOn = s.nodes[0].online;
                 setLive(anyOn, anyOn ? "Live" : "Waiting");
                 setStatus(s.status.level, s.status.title, s.status.detail);
@@ -400,19 +464,13 @@
                 const th = s.thresholds, n = s.nearest;
                 const front = n && n.in_front ? n.m : null;
                 setArcs(["arcF1", "arcF2"], level(front, th.warn_m, th.warn_m * 2));
-                const left = s.lane.left ?? s.gloves.left.gap_cm, right = s.lane.right ?? s.gloves.right.gap_cm;
-                setArcs(["arcL1", "arcL2"], level(left, th.side_danger, th.side_caution));
-                setArcs(["arcR1", "arcR2"], level(right, th.side_danger, th.side_caution));
+                const left = s.gloves.left.gap_cm, right = s.gloves.right.gap_cm;  // shown as distances only, no lane-split verdict
                 $("tAhead").textContent = !helmetOn ? "–" : front !== null ? `${fmt(front, 1)} m` : "Clear";
                 $("tLeft").textContent = left === null ? "–" : `${fmt(left)} cm`;
                 $("tRight").textContent = right === null ? "–" : `${fmt(right)} cm`;
                 $("tSpeed").textContent = s.speed === null ? "–" : `${s.speed} km/h`;
                 $("tRiding").textContent = s.riding ? (SHORT[s.riding.key] || s.riding.name) : "–";
                 for (const k of ["Ahead", "Left", "Right", "Riding"]) $("q" + k).textContent = $("t" + k).textContent;
-                const lv = s.lane.verdict;
-                $("laneBox").className = "lanebox glass " + (lv || "");
-                $("laneVerdict").textContent = lv === "ok" ? "OK to split" : lv === "tight" ? "Too tight" : "No reading";
-                $("qLane").textContent = lv === "ok" ? "OK" : lv === "tight" ? "Too tight" : "–";
 
                 drawMotion(s);
                 $("ridingNote").textContent = !s.riding ? "Waiting for riding predictions" : s.riding.level === "safe" ? "Safe riding" : `${s.riding.name} detected`;
@@ -454,7 +512,6 @@
                     ...s.nodes.map(d => [d.name, d.online ? `Online · ${d.age}s` : d.age === null ? "Not seen" : `Offline · ${Math.round(d.age)}s`, d.online ? "ok" : "bad"]),
                     ["LiDAR", s.lidar_status || "–", ""],
                     ["Nearest object", n ? `${fmt(n.m, 2)} m at ${fmt(n.angle)}°` : "–", ""],
-                    ["Lane split", s.lane.verdict === "ok" ? "OK to split" : s.lane.verdict === "tight" ? "Too tight" : "No reading", s.lane.verdict === "tight" ? "bad" : s.lane.verdict === "ok" ? "ok" : ""],
                     ["Speed limit", `${s.thresholds.speed_limit} km/h`, s.speeding ? "bad" : ""],
                     ["Following gap", s.follow_gap_s === null ? `OK (keep ${s.thresholds.follow_s} s)` : `${s.follow_gap_s} s · too close`, s.follow_gap_s === null ? "" : "bad"],
                     ["LiDAR front angle", `${s.thresholds.front_deg}°`, ""],
@@ -462,14 +519,7 @@
                     ["Response time", s.latency.last === null ? "–" : `${s.latency.last} ms (avg ${s.latency.avg}, max ${s.latency.max})`, ""],
                     ...Object.entries(s.predictions).map(([k, v]) => [`${k[0].toUpperCase()}${k.slice(1)} prediction`, v, ""])
                 ];
-                $("sensorRows").innerHTML = "";
-                for (const [k, v, c] of rows) {
-                    const row = document.createElement("div");
-                    row.className = "srow";
-                    row.innerHTML = "<span></span><span></span>";
-                    row.children[0].textContent = k; row.children[1].textContent = v; row.children[1].className = c;
-                    $("sensorRows").appendChild(row);
-                }
+                fillRows($("sensorRows"), rows);
             }
 
             async function tick() {
@@ -477,16 +527,15 @@
                     const res = await fetch("/api/state", { cache: "no-store" });
                     const body = await res.json();
                     if (res.ok) render(body);
-                    else { setLive(false, "Database offline"); setStatus("idle", "Database not running", "Start MongoDB and this page reconnects by itself"); }
                 } catch (e) {
                     setLive(false, "Offline");
-                    setStatus("idle", "Dashboard server not reachable", "Check that rider_dashboard.py is running");
+                    setStatus("idle", "Dashboard server not reachable", "Run start.sh on the phone");
                 }
                 setTimeout(tick, 700);
             }
 
-            let summaryTimer = null;
-            const KIND_OF = { "Near object": "object", "Unsafe lane splitting": "lane", "Speeding": "speed",
+            let summaryTimer = null, summaryTrip = null, unlocked = false;
+            const KIND_OF = { "Near object": "object", "Speeding": "speed",
                               "Unsafe following distance": "follow" };
 
             function project(track, w, h, pad) {
@@ -498,6 +547,9 @@
             }
 
             function renderSummary(m) {
+                if (!m) { $("smGrade").textContent = "No trips yet"; return; }
+                $("smWhen").textContent = m.when;
+                $("smSafeRoute").textContent = m.safe_route_pct === null ? "–" : `${m.safe_route_pct}%`;
                 const color = m.score >= 85 ? "var(--safe)" : m.score >= 65 ? "var(--warn)" : "var(--danger)";
                 $("smRing").setAttribute("stroke-dashoffset", (364.4 * (1 - m.score / 100)).toFixed(1));
                 $("smRing").style.stroke = color;
@@ -520,11 +572,15 @@
                 }
                 const ok = m.track.length >= 2;
                 $("smWait").setAttribute("opacity", ok ? 0 : 1);
-                $("smLine").setAttribute("points", "");
+                $("smSegs").innerHTML = "";
                 $("smSpots").innerHTML = "";
                 if (ok) {
                     const to = project(m.track, 300, 170, 16);
-                    $("smLine").setAttribute("points", m.track.map(p => to(p).map(v => v.toFixed(1)).join(",")).join(" "));
+                    for (const seg of m.segments) {
+                        const pts = seg.points.map(p => to(p).map(v => v.toFixed(1)).join(",")).join(" ");
+                        const col = seg.kind ? KIND[seg.kind].color : "var(--safe)";
+                        $("smSegs").insertAdjacentHTML("beforeend", `<polyline points="${pts}" stroke="${col}"/>`);
+                    }
                     for (const sp of m.spots) {
                         const [x, y] = to(sp.point);
                         $("smSpots").insertAdjacentHTML("beforeend", `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="6" fill="${KIND[sp.kind].color}" stroke="#fff" stroke-width="1.5" opacity=".9"/>`);
@@ -532,28 +588,75 @@
                 }
                 const pen = Object.entries(m.penalties).map(([k, v]) => `${k.toLowerCase()} −${v}`).join(", ");
                 $("smNote").textContent = `Score starts at 100 and loses points per alert, averaged per 10 minutes of riding: ${pen}.`;
+                $("smEvents").innerHTML = m.events.length ? "" : '<p class="empty">No hazards recorded</p>';
+                for (const e of m.events) {
+                    const k = KIND[e.kind], row = document.createElement("div");
+                    row.className = "alert";
+                    row.innerHTML = `<div class="avatar" style="border-color:${k.color};color:${k.color}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">${k.icon}</svg></div><div><b></b><span class="num"></span></div>`;
+                    row.querySelector("b").textContent = e.text;
+                    row.querySelector("span").textContent = e.dur >= 1 ? `${e.time} · lasted ${Math.round(e.dur)} s` : e.time;
+                    $("smEvents").appendChild(row);
+                }
             }
 
             async function loadSummary() {
                 try {
-                    const res = await fetch("/api/summary", { cache: "no-store" });
+                    const res = await fetch("/api/summary" + (summaryTrip ? `?trip=${encodeURIComponent(summaryTrip)}` : ""), { cache: "no-store" });
                     if (res.ok) renderSummary(await res.json());
                 } catch (e) {}
-                if (view === "summary") summaryTimer = setTimeout(loadSummary, 2000);
+                if (view === "summary" && !summaryTrip) summaryTimer = setTimeout(loadSummary, 2000);  // live trip keeps updating
+            }
+
+            async function loadTrips() {
+                try {
+                    const list = await (await fetch("/api/trips", { cache: "no-store" })).json();
+                    $("tripList").innerHTML = list.length ? "" : '<p class="empty">No trips yet</p>';
+                    for (const t of list) {
+                        const row = document.createElement("div");
+                        row.className = "trip num";
+                        row.innerHTML = "<div><b></b><span></span></div><em></em>";
+                        row.querySelector("b").textContent = t.when;
+                        row.querySelector("span").textContent = `${clock(t.duration_s)} · ${t.distance_km.toFixed(2)} km · ${t.alerts} alerts`;
+                        row.querySelector("em").textContent = t.score;
+                        row.addEventListener("click", () => { summaryTrip = t.id; setView("summary"); });
+                        $("tripList").appendChild(row);
+                    }
+                } catch (e) {}
+            }
+
+            function setView(v) {
+                view = v;
+                for (const b of $("toggle").children) b.classList.toggle("on", b.dataset.v === v);
+                $("sensor").hidden = view !== "sensor";
+                $("summary").hidden = view !== "summary";
+                for (const g of document.querySelectorAll(".scene .tags, .scene .arcs")) g.style.display = view === "ride" ? "" : "none";
+                $("startScreen").hidden = true;  // render() shows it again on the next tick if needed
+                clearTimeout(summaryTimer);
+                if (view === "summary") loadSummary();
+            }
+
+            async function post(url) {
+                try { return await (await fetch(url, { method: "POST" })).json(); } catch (e) { return {}; }
             }
 
             $("toggle").addEventListener("click", e => {
                 if (!e.target.dataset.v) return;
-                view = e.target.dataset.v;
-                for (const b of $("toggle").children) b.classList.toggle("on", b === e.target);
-                $("sensor").hidden = view !== "sensor";
-                $("summary").hidden = view !== "summary";
-                for (const g of document.querySelectorAll(".scene .tags, .scene .arcs")) g.style.display = view === "ride" ? "" : "none";
-                $("laneBox").hidden = view !== "ride";
-                clearTimeout(summaryTimer);
-                if (view === "summary") loadSummary();
+                if (e.target.dataset.v === "summary") summaryTrip = null;  // tab shows the current or latest trip
+                setView(e.target.dataset.v);
+            });
+            async function startTrip() { unlocked = false; await post("/api/trip/start"); setView("ride"); }
+            $("startBtn").addEventListener("click", startTrip);
+            $("newTripBtn").addEventListener("click", startTrip);
+            $("anywayBtn").addEventListener("click", () => { unlocked = true; $("waitScreen").hidden = true; });
+            $("cancelBtn").addEventListener("click", async () => { await post("/api/trip/end?discard=1"); loadTrips(); });
+            $("endBtn").addEventListener("click", async () => {
+                const r = await post("/api/trip/end");
+                loadTrips();
+                summaryTrip = r.id || null;
+                setView("summary");
             });
             drawBars([], 0);
+            loadTrips();
             tick();
         </script>
     </body>
