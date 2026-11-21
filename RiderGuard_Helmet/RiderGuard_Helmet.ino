@@ -10,7 +10,8 @@
 // ---------------- NETWORK SETTINGS ----------------
 const char *ssid = "YOUR_WIFI_SSID";
 const char *pass = "YOUR_WIFI_PASSWORD";
-char *server = "mqtt://YOUR_IP_ADDRESS:1883";
+char *server = "mqtt://HOSTING_IP_ADDRESS:1883";
+
 char *publishTopic = "riderguard/location";
 char *cmdTopic = "riderguard/cmd/helmet";      // latency_server.py reply, echoes seq/t_ms
 char *latencyTopic = "riderguard/latency";     // round-trip results, stored by server.py
@@ -29,7 +30,7 @@ const uint8_t GPS_RX_PIN = 26;
 const uint8_t GPS_TX_PIN = 27;
 
 // ---------------- SETTINGS ----------------
-const unsigned long REPORT_INTERVAL_MS = 1000;
+const unsigned long REPORT_INTERVAL_MS = 100;
 const unsigned long SCAN_TIMEOUT_MS = 2000;
 const unsigned long GPS_MAX_AGE_MS = 5000;
 const unsigned long LOCATION_STALE_AFTER_MS = 30000;
