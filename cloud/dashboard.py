@@ -8,13 +8,13 @@ from flask import Flask, render_template
 from pymongo import DESCENDING, MongoClient
 
 app = Flask(__name__)
-col = MongoClient("mongodb://localhost:27017/")["riderguard"]["readings"]
 
 
 def fmt(doc):
     return {
         "topic": doc["topic"],
         "time": datetime.fromtimestamp(doc["received_at"]).strftime("%H:%M:%S"),
+        "label": doc.get("label") or "",
         "data": json.dumps(doc["data"]),
     }
 
@@ -30,5 +30,13 @@ def index():
     return render_template("index.html", topics=topics, recent=recent), 200
 
 
-if __name__ == "__main__":
+def main():
+    global client, db, col, app
+    client = MongoClient("mongodb://localhost:27017/")
+    db = client["riderguard"]
+    col = db["readings"]
     app.run(host="0.0.0.0", port=3237)
+
+
+if __name__ == "__main__":
+    main()

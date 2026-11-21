@@ -14,11 +14,20 @@ const char *pass = "YOUR_WIFI_PASSWORD";
 char *server = "mqtt://HOSTING_IP_ADDRESS:1883";
 
 char *publishTopic = "riderguard/leftGloveMPU6050";
+char *cmdTopic = "riderguard/cmd/leftGlove";    // ml/predict.py reply, echoes seq/t_ms
+char *latencyTopic = "riderguard/latency";       // round-trip results, stored by server.py
 
 ESP32MQTTClient mqttClient;
 
-const unsigned long MQTT_INTERVAL_MS = 300;
+const unsigned long MQTT_INTERVAL_MS = 100;
 unsigned long lastMqttPublish = 0;
+
+// ---------------- LATENCY ----------------
+unsigned long seq = 0;
+volatile bool gotCmd = false;              // set in MQTT callback, handled in loop()
+volatile unsigned long cmdLatencyMs = 0;
+volatile unsigned long cmdSeq = 0;
+volatile bool cmdVibrate = false;
 
 // ---------------- PIN DEFINITIONS ----------------
 #define MPU_ADDR       0x68
@@ -41,6 +50,7 @@ bool motorActive = false;
 unsigned long motorStartTime = 0;
 bool previousNearObject = false;
 bool currCycleMotorOn = false;
+bool hazardPulse = false;  // current pulse was started by the phone's vibrate command
 
 // Read two consecutive MPU registers
 int16_t read16(byte reg) {
@@ -94,7 +104,7 @@ void setup() {
   Serial.begin(115200);
 
   // ---------------- WIFI + MQTT ----------------
-  WiFi.begin(ssid, password);
+  WiFi.begin(ssid, pass);
 
   Serial.print("Connecting to Wi-Fi");
 
@@ -169,19 +179,45 @@ void loop() {
       distance < DETECTION_THRESHOLD_CM;
 
   // ---------------- MOTOR CONTROL ----------------
-  // One short pulse on each transition into near-object state.
-  // This avoids holding the motor on continuously.
+  // Pulses repeatedly while an object is within DETECTION_THRESHOLD_CM and stops as soon as it leaves.
+  // A vibrate command from the phone (model hazard) adds one full pulse, even with nothing nearby.
   if (nearObject && !motorActive) {
     digitalWrite(MOTOR_PIN, HIGH);
     motorActive = true;
+    hazardPulse = false;
     motorStartTime = millis();
   }
 
   currCycleMotorOn = motorActive;
 
-  if (!nearObject || (motorActive && millis() - motorStartTime >= MOTOR_PULSE_MS)) {
+  if ((!nearObject && !hazardPulse) || (motorActive && millis() - motorStartTime >= MOTOR_PULSE_MS)) {
     digitalWrite(MOTOR_PIN, LOW);
     motorActive = false;
+    hazardPulse = false;
+  }
+
+  // ---------------- CLOUD REPLY (latency + ML warning) ----------------
+  if (gotCmd) {
+    gotCmd = false;
+
+    Serial.print("ROUND TRIP seq ");
+    Serial.print(cmdSeq);
+    Serial.print(": ");
+    Serial.print(cmdLatencyMs);
+    Serial.println(" ms");
+
+    char latencyPayload[96];
+    snprintf(latencyPayload, sizeof(latencyPayload),
+             "{\"node\":\"leftGlove\",\"seq\":%lu,\"rtt_ms\":%lu}",
+             cmdSeq, cmdLatencyMs);
+    mqttClient.publish(latencyTopic, latencyPayload, 0, false);
+
+    if (cmdVibrate && !motorActive) {
+      digitalWrite(MOTOR_PIN, HIGH);
+      motorActive = true;
+      hazardPulse = true;
+      motorStartTime = millis();
+    }
   }
 
   // ---------------- SERIAL OUTPUT ----------------
@@ -227,10 +263,12 @@ void loop() {
     snprintf(
       payload,
       sizeof(payload),
-      "{\"ax\":%.3f,\"ay\":%.3f,\"az\":%.3f,"
+      "{\"seq\":%lu,\"t_ms\":%lu,"
+      "\"ax\":%.3f,\"ay\":%.3f,\"az\":%.3f,"
       "\"gx\":%.3f,\"gy\":%.3f,\"gz\":%.3f,"
       "\"distance_cm\":%.2f,"
       "\"motor\":\"%s\"}",
+      seq++, millis(),
       ax, ay, az,
       gx, gy, gz,
       distance,
@@ -254,6 +292,22 @@ void loop() {
 // ---------------- MQTT CALLBACK ----------------
 void onMqttConnect(esp_mqtt_client_handle_t client) {
   Serial.println("MQTT CONNECTED!");
+
+  if (mqttClient.isMyTurn(client)) {
+    // Older library versions use (const String &payload) instead
+    mqttClient.subscribe(cmdTopic, [](const std::string &payload) {
+      unsigned long now = millis();
+      const char *t = strstr(payload.c_str(), "\"t_ms\":");
+      const char *s = strstr(payload.c_str(), "\"seq\":");
+      if (t == NULL || s == NULL) {
+        return;  // reply without timestamps
+      }
+      cmdLatencyMs = now - strtoul(t + 7, NULL, 10);
+      cmdSeq = strtoul(s + 6, NULL, 10);
+      cmdVibrate = strstr(payload.c_str(), "\"vibrate\"") != NULL;
+      gotCmd = true;
+    });
+  }
 }
 
 #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)
